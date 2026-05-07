@@ -67,6 +67,57 @@ impl Vault {
         Ok(Self { conn, path: path.into(), key: Some(key) })
     }
 
+    /// Open an existing vault file. Returns a *locked* vault — call `unlock` next.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Err(Error::NotFound);
+        }
+        let conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        Ok(Self { conn, path: path.into(), key: None })
+    }
+
+    /// Unlock with the master password. Verifies via the stored verifier blob.
+    pub fn unlock(&mut self, password: &[u8]) -> Result<()> {
+        let salt: Vec<u8> = self.conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![META_SALT],
+            |r| r.get(0),
+        )?;
+        let verifier_ct: Vec<u8> = self.conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![META_VERIFIER_CT],
+            |r| r.get(0),
+        )?;
+        let verifier_nonce_vec: Vec<u8> = self.conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![META_VERIFIER_NONCE],
+            |r| r.get(0),
+        )?;
+        let mut verifier_nonce = [0u8; crate::crypto::aead::NONCE_LEN];
+        if verifier_nonce_vec.len() != verifier_nonce.len() {
+            return Err(Error::InvalidInput("malformed verifier nonce".into()));
+        }
+        verifier_nonce.copy_from_slice(&verifier_nonce_vec);
+
+        let key_bytes = kdf::derive_key(password, &salt)?;
+        let candidate = MasterKey::new(key_bytes);
+
+        // If the password is wrong, decrypt fails -> Error::Aead.
+        let pt = crate::crypto::aead::decrypt(candidate.as_bytes(), &verifier_ct, &verifier_nonce)?;
+        if pt != KDF_VERIFIER_PLAINTEXT {
+            return Err(Error::Aead);
+        }
+        self.key = Some(candidate);
+        Ok(())
+    }
+
+    /// Drop the master key from memory.
+    pub fn lock(&mut self) {
+        self.key = None; // MasterKey is ZeroizeOnDrop.
+    }
+
     pub fn path(&self) -> &Path { &self.path }
     pub fn is_unlocked(&self) -> bool { self.key.is_some() }
 
@@ -115,5 +166,45 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn open_starts_locked() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("vault.db");
+        Vault::create(&path, b"hunter2").unwrap();
+        let v = Vault::open(&path).unwrap();
+        assert!(!v.is_unlocked());
+    }
+
+    #[test]
+    fn unlock_with_correct_password_succeeds() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("vault.db");
+        Vault::create(&path, b"hunter2").unwrap();
+        let mut v = Vault::open(&path).unwrap();
+        v.unlock(b"hunter2").unwrap();
+        assert!(v.is_unlocked());
+    }
+
+    #[test]
+    fn unlock_with_wrong_password_fails() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("vault.db");
+        Vault::create(&path, b"hunter2").unwrap();
+        let mut v = Vault::open(&path).unwrap();
+        let err = v.unlock(b"WRONG").unwrap_err();
+        assert!(matches!(err, Error::Aead));
+        assert!(!v.is_unlocked());
+    }
+
+    #[test]
+    fn lock_clears_key() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("vault.db");
+        let mut v = Vault::create(&path, b"hunter2").unwrap();
+        assert!(v.is_unlocked());
+        v.lock();
+        assert!(!v.is_unlocked());
     }
 }
