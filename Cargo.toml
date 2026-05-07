@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "Proprietary"
+authors = ["chris"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

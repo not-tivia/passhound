@@ -1,0 +1,15 @@
+[package]
+name = "passhound-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "passhound"
+path = "src/main.rs"
+
+[dependencies]
+passhound-core = { path = "../core" }
