@@ -112,29 +112,33 @@ pub fn current_plaintext(vault: &Vault, account_id: i64) -> Result<Option<Zeroiz
     }
     let mut nonce = [0u8; NONCE_LEN];
     nonce.copy_from_slice(&nonce_vec);
-    let pt = aead::decrypt(key.as_bytes(), &ct, &nonce)?;
-    let s = String::from_utf8(pt).map_err(|_| Error::InvalidInput("non-utf8 password".into()))?;
-    Ok(Some(Zeroizing::new(s)))
+    let pt = Zeroizing::new(aead::decrypt(key.as_bytes(), &ct, &nonce)?);
+    let s = std::str::from_utf8(&pt).map_err(|_| Error::InvalidInput("non-utf8 password".into()))?;
+    Ok(Some(Zeroizing::new(s.to_owned())))
 }
 
 /// Set a new current password for an account, retiring any previous current.
-/// Returns the new record.
+/// Returns the new record. The retire+insert pair is atomic: a partial
+/// failure cannot leave the account with no current password.
 pub fn set_current(vault: &Vault, account_id: i64, plaintext: &str, source: &str) -> Result<PasswordRecord> {
-    // Retire whatever's current (silent if none).
     let now = Utc::now();
-    let _ = vault.conn().execute(
+    let tx = vault.conn().unchecked_transaction()?;
+    // Retire whatever's current (silent if none).
+    tx.execute(
         "UPDATE password_history SET retired_at = ?1
          WHERE account_id = ?2 AND retired_at IS NULL",
         params![now.to_rfc3339(), account_id],
     )?;
-    insert(vault, NewPassword {
+    let record = insert(vault, NewPassword {
         account_id,
         plaintext,
         source: source.into(),
         confidence: Confidence::Certain,
         notes: None,
         created_at: Some(now),
-    })
+    })?;
+    tx.commit()?;
+    Ok(record)
 }
 
 #[cfg(test)]
