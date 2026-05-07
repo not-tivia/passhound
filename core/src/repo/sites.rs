@@ -1,0 +1,141 @@
+use crate::error::{Error, Result};
+use crate::vault::Vault;
+use chrono::{DateTime, Utc};
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Site {
+    pub id: i64,
+    pub name: String,
+    pub url: Option<String>,
+    pub category: Option<String>,
+    pub abbreviations: Vec<String>,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NewSite {
+    pub name: String,
+    pub url: Option<String>,
+    pub category: Option<String>,
+    pub abbreviations: Vec<String>,
+    pub notes: Option<String>,
+}
+
+pub fn create(vault: &Vault, new: NewSite) -> Result<Site> {
+    if new.name.trim().is_empty() {
+        return Err(Error::InvalidInput("site name required".into()));
+    }
+    let abbr_json = serde_json::to_string(&new.abbreviations)
+        .map_err(|e| Error::InvalidInput(format!("abbreviations: {e}")))?;
+    let now = Utc::now();
+    vault.conn().execute(
+        "INSERT INTO sites (name, url, category, abbreviations, notes, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![new.name, new.url, new.category, abbr_json, new.notes, now.to_rfc3339()],
+    )?;
+    let id = vault.conn().last_insert_rowid();
+    Ok(Site {
+        id,
+        name: new.name,
+        url: new.url,
+        category: new.category,
+        abbreviations: new.abbreviations,
+        notes: new.notes,
+        created_at: now,
+    })
+}
+
+pub fn get(vault: &Vault, id: i64) -> Result<Site> {
+    vault.conn().query_row(
+        "SELECT id, name, url, category, abbreviations, notes, created_at FROM sites WHERE id = ?1",
+        params![id],
+        row_to_site,
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
+        other => Error::from(other),
+    })
+}
+
+pub fn list(vault: &Vault) -> Result<Vec<Site>> {
+    let mut stmt = vault.conn().prepare(
+        "SELECT id, name, url, category, abbreviations, notes, created_at FROM sites ORDER BY name",
+    )?;
+    let rows = stmt
+        .query_map([], row_to_site)?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+fn row_to_site(row: &rusqlite::Row<'_>) -> rusqlite::Result<Site> {
+    let abbr_json: String = row.get(4)?;
+    let abbreviations: Vec<String> = serde_json::from_str(&abbr_json).unwrap_or_default();
+    let created_str: String = row.get(6)?;
+    let created_at = DateTime::parse_from_rfc3339(&created_str)
+        .map(|d| d.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    Ok(Site {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        url: row.get(2)?,
+        category: row.get(3)?,
+        abbreviations,
+        notes: row.get(5)?,
+        created_at,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn vault() -> (TempDir, Vault) {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("v.db");
+        let v = Vault::create(&path, b"hunter2").unwrap();
+        (tmp, v)
+    }
+
+    #[test]
+    fn create_and_get() {
+        let (_tmp, v) = vault();
+        let s = create(&v, NewSite {
+            name: "RuneScape".into(),
+            url: Some("runescape.com".into()),
+            category: Some("Gaming".into()),
+            abbreviations: vec!["RS".into(), "rs07".into()],
+            notes: None,
+        }).unwrap();
+        assert_eq!(s.name, "RuneScape");
+        let fetched = get(&v, s.id).unwrap();
+        assert_eq!(fetched.id, s.id);
+        assert_eq!(fetched.abbreviations, vec!["RS".to_string(), "rs07".to_string()]);
+    }
+
+    #[test]
+    fn create_rejects_empty_name() {
+        let (_tmp, v) = vault();
+        let err = create(&v, NewSite::default()).unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
+    }
+
+    #[test]
+    fn list_returns_sites_ordered_by_name() {
+        let (_tmp, v) = vault();
+        for name in ["Zoom", "Amazon", "GitHub"] {
+            create(&v, NewSite { name: name.into(), ..Default::default() }).unwrap();
+        }
+        let names: Vec<String> = list(&v).unwrap().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["Amazon", "GitHub", "Zoom"]);
+    }
+
+    #[test]
+    fn get_returns_not_found_for_unknown_id() {
+        let (_tmp, v) = vault();
+        let err = get(&v, 999).unwrap_err();
+        assert!(matches!(err, Error::NotFound));
+    }
+}
