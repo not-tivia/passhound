@@ -3,9 +3,9 @@ use rusqlite::Connection;
 
 const INITIAL: &str = include_str!("001_initial.sql");
 
-/// Apply all migrations to a fresh DB. Idempotent: calling on an already-initialized
-/// DB will fail with a SQLite "table already exists" error, which is the caller's
-/// signal to use `Vault::open` rather than `Vault::create`.
+/// Apply the initial schema to a fresh DB. NOT idempotent — calling on an
+/// already-initialized DB fails with a SQLite "table already exists" error,
+/// which is the caller's signal to use `Vault::open` rather than `Vault::create`.
 pub fn apply_initial(conn: &Connection) -> Result<()> {
     conn.execute_batch(INITIAL)?;
     Ok(())
@@ -27,8 +27,8 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        // Internal sqlite tables get filtered out automatically by the query above
-        // because they start with "sqlite_" and we don't expect them in our list.
+        // sqlite_master lists internal tables too (e.g. sqlite_sequence from
+        // AUTOINCREMENT) — we only check that our 9 user tables are present.
         assert!(names.contains(&"sites".into()));
         assert!(names.contains(&"accounts".into()));
         assert!(names.contains(&"password_history".into()));
