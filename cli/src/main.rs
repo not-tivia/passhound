@@ -20,6 +20,8 @@ enum Command {
     Init,
     /// Add a new password to the vault.
     Add(commands::add::AddArgs),
+    /// List all accounts in the vault.
+    List,
 }
 
 fn default_vault_path() -> PathBuf {
@@ -34,5 +36,6 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Init => commands::init::run(&vault_path),
         Command::Add(args) => commands::add::run(&vault_path, args),
+        Command::List => commands::list::run(&vault_path),
     }
 }
