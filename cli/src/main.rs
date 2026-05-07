@@ -18,6 +18,8 @@ struct Cli {
 enum Command {
     /// Create a new vault.
     Init,
+    /// Add a new password to the vault.
+    Add(commands::add::AddArgs),
 }
 
 fn default_vault_path() -> PathBuf {
@@ -31,5 +33,6 @@ fn main() -> anyhow::Result<()> {
     let vault_path = cli.vault.unwrap_or_else(default_vault_path);
     match cli.command {
         Command::Init => commands::init::run(&vault_path),
+        Command::Add(args) => commands::add::run(&vault_path, args),
     }
 }
