@@ -22,6 +22,8 @@ enum Command {
     Add(commands::add::AddArgs),
     /// List all accounts in the vault.
     List,
+    /// Reveal the current password for an account.
+    Get(commands::get::GetArgs),
 }
 
 fn default_vault_path() -> PathBuf {
@@ -37,5 +39,6 @@ fn main() -> anyhow::Result<()> {
         Command::Init => commands::init::run(&vault_path),
         Command::Add(args) => commands::add::run(&vault_path, args),
         Command::List => commands::list::run(&vault_path),
+        Command::Get(args) => commands::get::run(&vault_path, args),
     }
 }
