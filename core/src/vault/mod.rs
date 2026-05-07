@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 
 const KDF_VERIFIER_PLAINTEXT: &[u8] = b"passhound-vault-v1";
 
+const META_SALT: &str = "salt";
+const META_VERIFIER_CT: &str = "verifier_ct";
+const META_VERIFIER_NONCE: &str = "verifier_nonce";
+
 /// An open vault. May be locked (no key) or unlocked (key in memory).
 pub struct Vault {
     conn: Connection,
@@ -30,9 +34,8 @@ impl Vault {
         if path.exists() {
             return Err(Error::AlreadyExists);
         }
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        schema::apply_initial(&conn)?;
 
         let salt = kdf::generate_salt();
         let key_bytes = kdf::derive_key(password, &salt)?;
@@ -42,18 +45,24 @@ impl Vault {
         // detect wrong passwords on later opens without leaking anything useful.
         let (verifier_ct, verifier_nonce) =
             crate::crypto::aead::encrypt(key.as_bytes(), KDF_VERIFIER_PLAINTEXT)?;
-        conn.execute(
-            "INSERT INTO vault_meta (key, value) VALUES ('salt', ?1)",
-            params![salt.as_slice()],
+
+        // Apply schema and persist meta atomically — a crash mid-create must not
+        // leave a half-built vault that Vault::open can never read.
+        let tx = conn.transaction()?;
+        schema::apply_initial(&tx)?;
+        tx.execute(
+            "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)",
+            params![META_SALT, salt.as_slice()],
         )?;
-        conn.execute(
-            "INSERT INTO vault_meta (key, value) VALUES ('verifier_ct', ?1)",
-            params![verifier_ct],
+        tx.execute(
+            "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)",
+            params![META_VERIFIER_CT, verifier_ct],
         )?;
-        conn.execute(
-            "INSERT INTO vault_meta (key, value) VALUES ('verifier_nonce', ?1)",
-            params![verifier_nonce.as_slice()],
+        tx.execute(
+            "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)",
+            params![META_VERIFIER_NONCE, verifier_nonce.as_slice()],
         )?;
+        tx.commit()?;
 
         Ok(Self { conn, path: path.into(), key: Some(key) })
     }
