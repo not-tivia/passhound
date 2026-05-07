@@ -7,6 +7,10 @@ fn params() -> Params {
     Params::new(64 * 1024, 3, 1, Some(32)).expect("valid argon2 params")
 }
 
+/// Derive a 32-byte key from a master password and a salt.
+///
+/// Uses Argon2id with parameters chosen to take ~250ms on a modern desktop.
+/// Salt MUST be at least 16 bytes and unique per vault.
 pub fn derive_key(password: &[u8], salt: &[u8]) -> Result<[u8; 32]> {
     if salt.len() < 16 {
         return Err(Error::InvalidInput("salt must be at least 16 bytes".into()));
@@ -19,6 +23,7 @@ pub fn derive_key(password: &[u8], salt: &[u8]) -> Result<[u8; 32]> {
     Ok(out)
 }
 
+/// Generate a fresh random 16-byte salt for a new vault.
 pub fn generate_salt() -> [u8; 16] {
     let mut s = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut s);
