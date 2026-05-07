@@ -141,6 +141,58 @@ pub fn set_current(vault: &Vault, account_id: i64, plaintext: &str, source: &str
     Ok(record)
 }
 
+/// List all password records for an account, newest `created_at` first.
+/// Does NOT decrypt; returns metadata only. Use `current_plaintext` or `decrypt_record`
+/// for the actual passwords.
+pub fn list_history(vault: &Vault, account_id: i64) -> Result<Vec<PasswordRecord>> {
+    let mut stmt = vault.conn().prepare(
+        "SELECT id, account_id, created_at, retired_at, source, confidence, notes
+         FROM password_history WHERE account_id = ?1 ORDER BY created_at DESC",
+    )?;
+    let rows = stmt
+        .query_map(params![account_id], |row| {
+            let created_str: String = row.get(2)?;
+            let retired_str: Option<String> = row.get(3)?;
+            let confidence_str: String = row.get(5)?;
+            Ok(PasswordRecord {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                created_at: DateTime::parse_from_rfc3339(&created_str)
+                    .map(|d| d.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now()),
+                retired_at: retired_str.and_then(|s| {
+                    DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))
+                }),
+                source: row.get(4)?,
+                confidence: Confidence::parse(&confidence_str),
+                notes: row.get(6)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Decrypt a specific record by id. Vault must be unlocked.
+pub fn decrypt_record(vault: &Vault, id: i64) -> Result<Zeroizing<String>> {
+    let key = vault.require_key()?;
+    let (ct, nonce_vec): (Vec<u8>, Vec<u8>) = vault.conn().query_row(
+        "SELECT password_encrypted, password_nonce FROM password_history WHERE id = ?1",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
+        other => Error::from(other),
+    })?;
+    if nonce_vec.len() != NONCE_LEN {
+        return Err(Error::InvalidInput("malformed nonce".into()));
+    }
+    let mut nonce = [0u8; NONCE_LEN];
+    nonce.copy_from_slice(&nonce_vec);
+    let pt = Zeroizing::new(aead::decrypt(key.as_bytes(), &ct, &nonce)?);
+    let s = std::str::from_utf8(&pt).map_err(|_| Error::InvalidInput("non-utf8 password".into()))?;
+    Ok(Zeroizing::new(s.to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +279,19 @@ mod tests {
             created_at: None,
         }).unwrap_err();
         assert!(matches!(err, Error::InvalidInput(_)));
+    }
+
+    #[test]
+    fn list_history_returns_all_records_newest_first() {
+        let (_t, v, aid) = setup();
+        set_current(&v, aid, "p1", "manual").unwrap();
+        set_current(&v, aid, "p2", "manual").unwrap();
+        set_current(&v, aid, "p3", "manual").unwrap();
+        let records = list_history(&v, aid).unwrap();
+        assert_eq!(records.len(), 3);
+        // Newest first: p3 (current, retired_at=None) is record[0].
+        assert!(records[0].retired_at.is_none());
+        assert!(records[1].retired_at.is_some());
+        assert!(records[2].retired_at.is_some());
     }
 }
