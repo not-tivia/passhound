@@ -2,6 +2,7 @@
 
 pub mod crypto;
 pub mod error;
+pub mod importer;
 pub mod repo;
 pub mod schema;
 pub mod vault;

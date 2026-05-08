@@ -27,4 +27,10 @@ pub enum Error {
 
     #[error("invalid input: {0}")]
     InvalidInput(String),
+
+    #[error("import: {0}")]
+    Import(String),
+
+    #[error("import: column mapping required for headers {headers:?}")]
+    NeedsColumnMapping { headers: Vec<String> },
 }
