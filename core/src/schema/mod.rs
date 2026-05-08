@@ -1,7 +1,11 @@
-use crate::error::Result;
-use rusqlite::Connection;
+use crate::error::{Error, Result};
+use rusqlite::{params, Connection, OptionalExtension};
 
 const INITIAL: &str = include_str!("001_initial.sql");
+
+pub const LATEST_VERSION: i32 = 2;
+const SCHEMA_VERSION_KEY: &str = "schema_version";
+const MIGRATION_002: &str = include_str!("002_source_provenance.sql");
 
 /// Apply the initial schema to a fresh DB. NOT idempotent — calling on an
 /// already-initialized DB fails with a SQLite "table already exists" error,
@@ -11,9 +15,56 @@ pub fn apply_initial(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Apply any migrations newer than the DB's current schema_version. Idempotent.
+/// Convention: a vault with no schema_version row is treated as version 1
+/// (because apply_initial covers schema 001). On a fresh DB, callers should
+/// invoke apply_initial first, then apply_migrations.
+pub fn apply_migrations(conn: &Connection) -> Result<()> {
+    let current: i32 = conn
+        .query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![SCHEMA_VERSION_KEY],
+            |r| {
+                let v: Vec<u8> = r.get(0)?;
+                Ok(std::str::from_utf8(&v)
+                    .ok()
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .unwrap_or(1))
+            },
+        )
+        .optional()?
+        .unwrap_or(1);
+
+    if current < 1 || current > LATEST_VERSION {
+        return Err(Error::InvalidInput(format!(
+            "unsupported schema_version {current}"
+        )));
+    }
+    if current >= LATEST_VERSION {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    if current < 2 {
+        tx.execute_batch(MIGRATION_002)?;
+    }
+    tx.execute(
+        "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![SCHEMA_VERSION_KEY, LATEST_VERSION.to_string().as_bytes()],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fresh_conn_with_initial() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_initial(&conn).unwrap();
+        conn
+    }
 
     #[test]
     fn applies_to_fresh_db() {
@@ -38,5 +89,71 @@ mod tests {
         assert!(names.contains(&"account_tags".into()));
         assert!(names.contains(&"imports".into()));
         assert!(names.contains(&"vault_meta".into()));
+    }
+
+    #[test]
+    fn apply_migrations_on_fresh_db_sets_version_to_2() {
+        let conn = fresh_conn_with_initial();
+        apply_migrations(&conn).unwrap();
+        let v: Vec<u8> = conn
+            .query_row(
+                "SELECT value FROM vault_meta WHERE key = ?1",
+                params![SCHEMA_VERSION_KEY],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v.as_slice(), b"2");
+    }
+
+    #[test]
+    fn apply_migrations_is_idempotent() {
+        let conn = fresh_conn_with_initial();
+        apply_migrations(&conn).unwrap();
+        apply_migrations(&conn).unwrap();
+        let v: Vec<u8> = conn
+            .query_row(
+                "SELECT value FROM vault_meta WHERE key = ?1",
+                params![SCHEMA_VERSION_KEY],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v.as_slice(), b"2");
+    }
+
+    #[test]
+    fn apply_migrations_upgrades_phase_1_vault() {
+        // Simulate a Phase-1 vault: apply_initial only, no schema_version row.
+        let conn = fresh_conn_with_initial();
+        // Assert column not yet present.
+        let mut stmt = conn.prepare("PRAGMA table_info(password_history)").unwrap();
+        let cols_before: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(!cols_before.contains(&"source_import_id".into()));
+
+        apply_migrations(&conn).unwrap();
+
+        let mut stmt = conn.prepare("PRAGMA table_info(password_history)").unwrap();
+        let cols_after: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(cols_after.contains(&"source_import_id".into()));
+    }
+
+    #[test]
+    fn apply_migrations_rejects_unknown_version() {
+        let conn = fresh_conn_with_initial();
+        // Manually write a bogus future version.
+        conn.execute(
+            "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)",
+            params![SCHEMA_VERSION_KEY, b"99"],
+        )
+        .unwrap();
+        let err = apply_migrations(&conn).unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
     }
 }
