@@ -33,4 +33,10 @@ pub enum Error {
 
     #[error("import: column mapping required for headers {headers:?}")]
     NeedsColumnMapping { headers: Vec<String> },
+
+    #[error("vault has no password history; nothing to recover from")]
+    EmptyVault,
+
+    #[error("no era named '{0}'")]
+    EraNotFound(String),
 }

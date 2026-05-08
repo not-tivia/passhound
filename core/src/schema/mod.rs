@@ -3,9 +3,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 const INITIAL: &str = include_str!("001_initial.sql");
 
-pub const LATEST_VERSION: i32 = 2;
+pub const LATEST_VERSION: i32 = 3;
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 const MIGRATION_002: &str = include_str!("002_source_provenance.sql");
+const MIGRATION_003: &str = include_str!("003_base_word_manual_override.sql");
 
 /// Apply the initial schema to a fresh DB. NOT idempotent — calling on an
 /// already-initialized DB fails with a SQLite "table already exists" error,
@@ -48,6 +49,9 @@ pub fn apply_migrations(conn: &Connection) -> Result<()> {
     // Opening a nested tx here would fail because SQLite doesn't support them.
     if current < 2 {
         conn.execute_batch(MIGRATION_002)?;
+    }
+    if current < 3 {
+        conn.execute_batch(MIGRATION_003)?;
     }
     conn.execute(
         "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)
@@ -93,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_migrations_on_fresh_db_sets_version_to_2() {
+    fn apply_migrations_on_fresh_db_sets_version_to_3() {
         let conn = fresh_conn_with_initial();
         apply_migrations(&conn).unwrap();
         let v: Vec<u8> = conn
@@ -103,7 +107,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v.as_slice(), b"2");
+        assert_eq!(v.as_slice(), b"3");
     }
 
     #[test]
@@ -118,14 +122,14 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v.as_slice(), b"2");
+        assert_eq!(v.as_slice(), b"3");
     }
 
     #[test]
     fn apply_migrations_upgrades_phase_1_vault() {
         // Simulate a Phase-1 vault: apply_initial only, no schema_version row.
         let conn = fresh_conn_with_initial();
-        // Assert column not yet present.
+        // Assert columns not yet present.
         let mut stmt = conn.prepare("PRAGMA table_info(password_history)").unwrap();
         let cols_before: Vec<String> = stmt
             .query_map([], |r| r.get::<_, String>(1))
@@ -133,6 +137,14 @@ mod tests {
             .map(|r| r.unwrap())
             .collect();
         assert!(!cols_before.contains(&"source_import_id".into()));
+
+        let mut stmt = conn.prepare("PRAGMA table_info(base_words)").unwrap();
+        let bw_before: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(!bw_before.contains(&"manual_override".into()));
 
         apply_migrations(&conn).unwrap();
 
@@ -143,6 +155,14 @@ mod tests {
             .map(|r| r.unwrap())
             .collect();
         assert!(cols_after.contains(&"source_import_id".into()));
+
+        let mut stmt = conn.prepare("PRAGMA table_info(base_words)").unwrap();
+        let bw_after: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(bw_after.contains(&"manual_override".into()));
     }
 
     #[test]
