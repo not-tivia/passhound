@@ -7,6 +7,8 @@
 
 use chrono::{DateTime, Utc};
 
+pub mod shred;
+
 /// A single parsed entry from any importer source.
 #[derive(Debug, Clone)]
 pub struct ImportEntry {
