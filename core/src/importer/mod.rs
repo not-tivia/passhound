@@ -9,10 +9,12 @@ use chrono::{DateTime, Utc};
 
 pub mod csv;
 pub mod paste;
+pub mod pipeline;
 pub mod shred;
 
 pub use csv::{parse_file as parse_csv, Mapping};
 pub use paste::parse_str as parse_paste;
+pub use pipeline::{preview, Classification, ClassifiedEntry, ImportId, Preview};
 
 /// A single parsed entry from any importer source.
 #[derive(Debug, Clone)]
