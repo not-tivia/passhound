@@ -50,6 +50,7 @@ impl Vault {
         // leave a half-built vault that Vault::open can never read.
         let tx = conn.transaction()?;
         schema::apply_initial(&tx)?;
+        schema::apply_migrations(&tx)?;
         tx.execute(
             "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)",
             params![META_SALT, salt.as_slice()],
@@ -75,6 +76,9 @@ impl Vault {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let tx = conn.unchecked_transaction()?;
+        schema::apply_migrations(&tx)?;
+        tx.commit()?;
         Ok(Self { conn, path: path.into(), key: None })
     }
 
