@@ -43,16 +43,17 @@ pub fn apply_migrations(conn: &Connection) -> Result<()> {
     if current >= LATEST_VERSION {
         return Ok(());
     }
-    let tx = conn.unchecked_transaction()?;
+    // The caller is responsible for atomicity: invoke this either inside an
+    // already-open transaction (Vault::create) or wrap it in one (Vault::open).
+    // Opening a nested tx here would fail because SQLite doesn't support them.
     if current < 2 {
-        tx.execute_batch(MIGRATION_002)?;
+        conn.execute_batch(MIGRATION_002)?;
     }
-    tx.execute(
+    conn.execute(
         "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![SCHEMA_VERSION_KEY, LATEST_VERSION.to_string().as_bytes()],
     )?;
-    tx.commit()?;
     Ok(())
 }
 
