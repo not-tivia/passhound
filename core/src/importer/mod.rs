@@ -7,9 +7,11 @@
 
 use chrono::{DateTime, Utc};
 
+pub mod csv;
 pub mod paste;
 pub mod shred;
 
+pub use csv::{parse_file as parse_csv, Mapping};
 pub use paste::parse_str as parse_paste;
 
 /// A single parsed entry from any importer source.
