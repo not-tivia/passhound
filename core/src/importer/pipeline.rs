@@ -2,8 +2,13 @@
 
 use super::{ImportEntry, ParseResult};
 use crate::error::{Error, Result};
-use crate::repo::{accounts, passwords, sites};
+use crate::repo::accounts::{self, NewAccount};
+use crate::repo::passwords::{self, Confidence, NewPassword};
+use crate::repo::sites::{self, NewSite};
 use crate::vault::Vault;
+use chrono::Utc;
+use rusqlite::params;
+use std::path::Path;
 
 /// A unique id for an import batch (matches the `imports` table's primary key).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +100,146 @@ pub fn preview_parse_result(vault: &Vault, parse: ParseResult) -> Result<Preview
     preview(vault, parse.entries)
 }
 
+/// Write the import. Single transaction. Returns the new `ImportId`.
+///
+/// Source label appears in the `imports.source` column (e.g., "csv", "paste").
+/// Source path is recorded in `imports.file_path` if provided.
+pub fn commit(
+    vault: &Vault,
+    preview: Preview,
+    source_label: &str,
+    source_path: Option<&Path>,
+) -> Result<ImportId> {
+    let _ = vault.require_key()?;
+    let now = Utc::now();
+    let tx = vault.conn().unchecked_transaction()?;
+
+    tx.execute(
+        "INSERT INTO imports (source, file_path, imported_at, entries_added, notes)
+         VALUES (?1, ?2, ?3, 0, NULL)",
+        params![
+            source_label,
+            source_path.map(|p| p.display().to_string()),
+            now.to_rfc3339(),
+        ],
+    )?;
+    let import_id = ImportId(tx.last_insert_rowid());
+
+    let mut entries_added: i64 = 0;
+    for item in preview.items {
+        match item.classification {
+            Classification::DuplicateOfTriple => continue,
+            Classification::New => {
+                let site_id = match item.matched_site_id {
+                    Some(id) => id,
+                    None => {
+                        let s = sites::create(
+                            vault,
+                            NewSite {
+                                name: item.entry.site.clone(),
+                                url: item.entry.url.clone(),
+                                category: None,
+                                abbreviations: vec![],
+                                notes: None,
+                            },
+                        )?;
+                        s.id
+                    }
+                };
+                let account_id = match item.matched_account_id {
+                    Some(id) => id,
+                    None => {
+                        let a = accounts::create(
+                            vault,
+                            NewAccount {
+                                site_id,
+                                username: item.entry.username.clone(),
+                                alias: None,
+                                notes: None,
+                            },
+                        )?;
+                        a.id
+                    }
+                };
+                insert_password_with_provenance(
+                    &tx,
+                    vault,
+                    account_id,
+                    &item.entry,
+                    import_id,
+                )?;
+                entries_added += 1;
+            }
+            Classification::MergeWithNewPassword => {
+                let account_id = item
+                    .matched_account_id
+                    .expect("Merge classification implies a matched account");
+                tx.execute(
+                    "UPDATE password_history SET retired_at = ?1
+                     WHERE account_id = ?2 AND retired_at IS NULL",
+                    params![now.to_rfc3339(), account_id],
+                )?;
+                insert_password_with_provenance(
+                    &tx,
+                    vault,
+                    account_id,
+                    &item.entry,
+                    import_id,
+                )?;
+                entries_added += 1;
+            }
+        }
+    }
+
+    tx.execute(
+        "UPDATE imports SET entries_added = ?1 WHERE id = ?2",
+        params![entries_added, import_id.0],
+    )?;
+    tx.commit()?;
+    Ok(import_id)
+}
+
+fn insert_password_with_provenance(
+    tx: &rusqlite::Transaction<'_>,
+    vault: &Vault,
+    account_id: i64,
+    entry: &ImportEntry,
+    import_id: ImportId,
+) -> Result<()> {
+    let key = vault.require_key()?;
+    let (ct, nonce) = crate::crypto::aead::encrypt(key.as_bytes(), entry.password.as_bytes())?;
+    let created_at = entry.created_at.unwrap_or_else(Utc::now);
+    let auto_note = match entry.notes.as_deref() {
+        Some(n) if !n.is_empty() => n.to_string(),
+        _ if entry.created_at.is_none() => {
+            "imported; original timestamp unknown".to_string()
+        }
+        _ => String::new(),
+    };
+    let notes_to_store: Option<String> = if auto_note.is_empty() {
+        None
+    } else {
+        Some(auto_note)
+    };
+
+    tx.execute(
+        "INSERT INTO password_history
+            (account_id, password_encrypted, password_nonce, created_at, source, confidence, notes, source_import_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            account_id,
+            ct,
+            nonce.as_slice(),
+            created_at.to_rfc3339(),
+            "import",
+            "uncertain",
+            notes_to_store,
+            import_id.0,
+        ],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +324,94 @@ mod tests {
 
         let p = preview(&v, vec![entry("Foo", None, "pw")]).unwrap();
         assert_eq!(p.duplicates, 1);
+    }
+
+    #[test]
+    fn commit_writes_imports_row_and_increments_entries_added() {
+        let (_t, v) = vault();
+        let p = preview(&v, vec![entry("Foo", Some("u"), "pw")]).unwrap();
+        let id = commit(&v, p, "test", None).unwrap();
+        let (source, entries_added): (String, i64) = v.conn().query_row(
+            "SELECT source, entries_added FROM imports WHERE id = ?1",
+            params![id.0],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        ).unwrap();
+        assert_eq!(source, "test");
+        assert_eq!(entries_added, 1);
+    }
+
+    #[test]
+    fn commit_assigns_source_import_id_on_inserted_passwords() {
+        let (_t, v) = vault();
+        let p = preview(&v, vec![entry("Foo", Some("u"), "pw")]).unwrap();
+        let id = commit(&v, p, "test", None).unwrap();
+        let count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM password_history WHERE source_import_id = ?1",
+            params![id.0],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn commit_skips_duplicate_classifications() {
+        let (_t, v) = vault();
+        seed_site_account_password(&v, "Foo", "u", "pw");
+        let p = preview(&v, vec![entry("Foo", Some("u"), "pw")]).unwrap();
+        assert_eq!(p.duplicates, 1);
+        let id = commit(&v, p, "test", None).unwrap();
+        let count_for_import: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM password_history WHERE source_import_id = ?1",
+            params![id.0],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count_for_import, 0);
+        let entries_added: i64 = v.conn().query_row(
+            "SELECT entries_added FROM imports WHERE id = ?1",
+            params![id.0],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(entries_added, 0);
+    }
+
+    #[test]
+    fn commit_retires_previous_current_for_merges() {
+        let (_t, v) = vault();
+        seed_site_account_password(&v, "Foo", "u", "old");
+        let p = preview(&v, vec![entry("Foo", Some("u"), "new")]).unwrap();
+        assert_eq!(p.merges, 1);
+        commit(&v, p, "test", None).unwrap();
+
+        let current_count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM password_history
+             WHERE account_id = (SELECT id FROM accounts WHERE site_id = (SELECT id FROM sites WHERE name='Foo'))
+             AND retired_at IS NULL",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(current_count, 1);
+        // Verify the new current decrypts to "new".
+        let aid: i64 = v.conn().query_row(
+            "SELECT id FROM accounts WHERE site_id = (SELECT id FROM sites WHERE name='Foo')",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        let pt = passwords::current_plaintext(&v, aid).unwrap().unwrap();
+        assert_eq!(pt.as_str(), "new");
+    }
+
+    #[test]
+    fn commit_inserts_inferred_timestamp_note_when_created_at_absent() {
+        let (_t, v) = vault();
+        let mut e = entry("Foo", Some("u"), "pw");
+        e.created_at = None;
+        let p = preview(&v, vec![e]).unwrap();
+        let id = commit(&v, p, "test", None).unwrap();
+        let notes: Option<String> = v.conn().query_row(
+            "SELECT notes FROM password_history WHERE source_import_id = ?1",
+            params![id.0],
+            |r| r.get(0),
+        ).unwrap();
+        assert!(notes.unwrap().contains("original timestamp unknown"));
     }
 }
