@@ -240,6 +240,53 @@ fn insert_password_with_provenance(
     Ok(())
 }
 
+/// Counts of rows deleted by `undo`.
+#[derive(Debug, Clone, Copy)]
+pub struct UndoCounts {
+    pub passwords: i64,
+    pub accounts: i64,
+    pub sites: i64,
+}
+
+/// Reverse a previous import. Deletes the import's password rows, then any
+/// orphan accounts (no remaining password_history rows), then any orphan sites
+/// (no remaining accounts), then the imports row itself. All in one transaction.
+///
+/// Errors with `Error::NotFound` if the import id doesn't exist.
+pub fn undo(vault: &Vault, import_id: ImportId) -> Result<UndoCounts> {
+    let tx = vault.conn().unchecked_transaction()?;
+
+    let pw_deleted = tx.execute(
+        "DELETE FROM password_history WHERE source_import_id = ?1",
+        params![import_id.0],
+    )? as i64;
+
+    let acc_deleted = tx.execute(
+        "DELETE FROM accounts WHERE id NOT IN (SELECT DISTINCT account_id FROM password_history)",
+        [],
+    )? as i64;
+
+    let site_deleted = tx.execute(
+        "DELETE FROM sites WHERE id NOT IN (SELECT DISTINCT site_id FROM accounts)",
+        [],
+    )? as i64;
+
+    let imp_deleted = tx.execute(
+        "DELETE FROM imports WHERE id = ?1",
+        params![import_id.0],
+    )?;
+    if imp_deleted == 0 {
+        return Err(Error::NotFound);
+    }
+
+    tx.commit()?;
+    Ok(UndoCounts {
+        passwords: pw_deleted,
+        accounts: acc_deleted,
+        sites: site_deleted,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,5 +460,89 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert!(notes.unwrap().contains("original timestamp unknown"));
+    }
+
+    #[test]
+    fn undo_deletes_only_that_imports_data() {
+        let (_t, v) = vault();
+        // Pre-existing data we want to preserve.
+        seed_site_account_password(&v, "Keepers", "k", "kpw");
+
+        // Import we'll undo.
+        let p = preview(&v, vec![
+            entry("Foo", Some("u"), "fpw"),
+            entry("Bar", Some("u"), "bpw"),
+        ]).unwrap();
+        let id = commit(&v, p, "test", None).unwrap();
+
+        let counts = undo(&v, id).unwrap();
+        assert_eq!(counts.passwords, 2);
+        assert_eq!(counts.accounts, 2);
+        assert_eq!(counts.sites, 2);
+
+        // Pre-existing data still there.
+        let keepers_count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM sites WHERE name='Keepers'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(keepers_count, 1);
+        // Imported data gone.
+        let foo_count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM sites WHERE name IN ('Foo','Bar')",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(foo_count, 0);
+        // imports row gone.
+        let import_count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM imports WHERE id = ?1",
+            params![id.0],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(import_count, 0);
+    }
+
+    #[test]
+    fn undo_unknown_id_returns_not_found() {
+        let (_t, v) = vault();
+        let err = undo(&v, ImportId(9999)).unwrap_err();
+        assert!(matches!(err, Error::NotFound));
+    }
+
+    #[test]
+    fn undo_keeps_account_when_other_passwords_remain() {
+        let (_t, v) = vault();
+        // Seed a site/account/password (NOT via import — no source_import_id).
+        let aid = seed_site_account_password(&v, "Foo", "u", "first");
+
+        // Import a merge — appends a NEW current row with source_import_id.
+        let p = preview(&v, vec![entry("Foo", Some("u"), "second")]).unwrap();
+        assert_eq!(p.merges, 1);
+        let id = commit(&v, p, "test", None).unwrap();
+
+        // Undo the import. The "first" row had no source_import_id so it stays;
+        // the account therefore stays; the site stays.
+        undo(&v, id).unwrap();
+
+        let acc_count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM accounts WHERE id = ?1",
+            params![aid],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(acc_count, 1);
+        let site_count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM sites WHERE name='Foo'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(site_count, 1);
+        // The retired-then-undone row's "second" password should be gone; "first" was retired by the merge but still present.
+        let pw_count: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM password_history WHERE account_id = ?1",
+            params![aid],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(pw_count, 1);
     }
 }
