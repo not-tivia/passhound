@@ -4,7 +4,7 @@ use passhound_core::importer::{
     Classification, ImportId, Mapping, ParseResult,
 };
 use passhound_core::Vault;
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(clap::Args)]
@@ -17,6 +17,24 @@ pub struct ImportArgs {
 pub enum ImportCommand {
     /// Import from a CSV file.
     Csv(CsvArgs),
+    /// Import from pasted text (file, stdin, or $EDITOR).
+    Paste(PasteArgs),
+}
+
+#[derive(clap::Args)]
+pub struct PasteArgs {
+    /// Read paste content from this file. If absent, read stdin (if piped) or $EDITOR (if a TTY).
+    #[arg(long)]
+    pub file: Option<PathBuf>,
+    /// Print every classified entry.
+    #[arg(long)]
+    pub show_conflicts: bool,
+    /// Apply the import.
+    #[arg(long)]
+    pub commit: bool,
+    /// Skip the post-commit shred prompt (only relevant when --file was passed).
+    #[arg(long)]
+    pub no_shred: bool,
 }
 
 #[derive(clap::Args)]
@@ -41,6 +59,7 @@ pub struct CsvArgs {
 pub fn run(vault_path: &Path, args: ImportArgs) -> Result<()> {
     match args.command {
         ImportCommand::Csv(a) => run_csv(vault_path, a),
+        ImportCommand::Paste(a) => run_paste(vault_path, a),
     }
 }
 
@@ -91,6 +110,74 @@ fn run_csv(vault_path: &Path, args: CsvArgs) -> Result<()> {
         prompt_and_shred(&args.path)?;
     }
     Ok(())
+}
+
+fn run_paste(vault_path: &Path, args: PasteArgs) -> Result<()> {
+    if !vault_path.exists() {
+        anyhow::bail!("vault not found at {}", vault_path.display());
+    }
+
+    let pw = rpassword::prompt_password("Master password: ")?;
+    let mut vault = Vault::open(vault_path)?;
+    vault.unlock(pw.as_bytes()).context("unlock failed")?;
+
+    let (input_text, source_path): (String, Option<PathBuf>) = match args.file.as_deref() {
+        Some(p) => (
+            std::fs::read_to_string(p).with_context(|| format!("read {}", p.display()))?,
+            Some(p.to_path_buf()),
+        ),
+        None => {
+            use std::io::IsTerminal;
+            if std::io::stdin().is_terminal() {
+                (read_from_editor()?, None)
+            } else {
+                let mut buf = String::new();
+                std::io::stdin().lock().read_to_string(&mut buf)?;
+                (buf, None)
+            }
+        }
+    };
+
+    let parse_result = passhound_core::importer::parse_paste(&input_text);
+    print_diagnostics(&parse_result);
+
+    let preview = pipeline::preview(&vault, parse_result.entries)?;
+    print_summary(&preview, parse_result.diagnostics.len());
+
+    if args.show_conflicts {
+        print_conflicts(&preview);
+    }
+
+    if !args.commit {
+        println!("(dry run; rerun with --commit to apply)");
+        return Ok(());
+    }
+
+    let import_id = pipeline::commit(&vault, preview, "paste", source_path.as_deref())?;
+    println!("Imported (id={}).", import_id.0);
+
+    if !args.no_shred {
+        if let Some(p) = source_path.as_deref() {
+            prompt_and_shred(p)?;
+        }
+    }
+    Ok(())
+}
+
+fn read_from_editor() -> Result<String> {
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+    let tmp = tempfile::NamedTempFile::new()?;
+    let path = tmp.path().to_path_buf();
+    let status = std::process::Command::new(&editor)
+        .arg(&path)
+        .status()
+        .with_context(|| format!("launch editor {editor}"))?;
+    if !status.success() {
+        anyhow::bail!("editor exited with non-zero status");
+    }
+    let mut content = String::new();
+    std::fs::File::open(&path)?.read_to_string(&mut content)?;
+    Ok(content)
 }
 
 fn parse_mapping_arg(s: &str, path: &Path) -> Result<Mapping> {
