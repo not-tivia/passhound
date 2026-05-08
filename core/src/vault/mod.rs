@@ -126,11 +126,11 @@ impl Vault {
     pub fn is_unlocked(&self) -> bool { self.key.is_some() }
 
     /// Internal helper: returns the key or `Error::Locked`.
-    pub(crate) fn require_key(&self) -> Result<&MasterKey> {
+    pub fn require_key(&self) -> Result<&MasterKey> {
         self.key.as_ref().ok_or(Error::Locked)
     }
 
-    pub(crate) fn conn(&self) -> &Connection { &self.conn }
+    pub fn conn(&self) -> &Connection { &self.conn }
 }
 
 #[cfg(test)]
