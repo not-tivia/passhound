@@ -17,3 +17,4 @@ clap = { version = "4", features = ["derive"] }
 rpassword = "7"
 anyhow = "1"
 directories = "5"
+csv = "1"

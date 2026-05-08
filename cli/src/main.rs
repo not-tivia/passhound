@@ -24,6 +24,8 @@ enum Command {
     List,
     /// Reveal the current password for an account.
     Get(commands::get::GetArgs),
+    /// Import passwords from a file or pasted text.
+    Import(commands::import::ImportArgs),
 }
 
 fn default_vault_path() -> PathBuf {
@@ -40,5 +42,6 @@ fn main() -> anyhow::Result<()> {
         Command::Add(args) => commands::add::run(&vault_path, args),
         Command::List => commands::list::run(&vault_path),
         Command::Get(args) => commands::get::run(&vault_path, args),
+        Command::Import(args) => commands::import::run(&vault_path, args),
     }
 }
