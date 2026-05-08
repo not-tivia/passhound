@@ -19,6 +19,14 @@ pub enum ImportCommand {
     Csv(CsvArgs),
     /// Import from pasted text (file, stdin, or $EDITOR).
     Paste(PasteArgs),
+    /// Reverse a previous import by id.
+    Undo(UndoArgs),
+}
+
+#[derive(clap::Args)]
+pub struct UndoArgs {
+    /// The import id to reverse (find via `import list` or the message printed after a commit).
+    pub id: i64,
 }
 
 #[derive(clap::Args)]
@@ -60,6 +68,7 @@ pub fn run(vault_path: &Path, args: ImportArgs) -> Result<()> {
     match args.command {
         ImportCommand::Csv(a) => run_csv(vault_path, a),
         ImportCommand::Paste(a) => run_paste(vault_path, a),
+        ImportCommand::Undo(a) => run_undo(vault_path, a),
     }
 }
 
@@ -332,4 +341,26 @@ fn truncate(s: &str, n: usize) -> String {
         let cut: String = s.chars().take(n).collect();
         format!("{cut}…")
     }
+}
+
+fn run_undo(vault_path: &Path, args: UndoArgs) -> Result<()> {
+    if !vault_path.exists() {
+        anyhow::bail!("vault not found at {}", vault_path.display());
+    }
+    let pw = rpassword::prompt_password("Master password: ")?;
+    let mut vault = Vault::open(vault_path)?;
+    vault.unlock(pw.as_bytes()).context("unlock failed")?;
+
+    let counts = match pipeline::undo(&vault, ImportId(args.id)) {
+        Ok(c) => c,
+        Err(passhound_core::Error::NotFound) => {
+            anyhow::bail!("unknown import id {}", args.id);
+        }
+        Err(e) => return Err(e.into()),
+    };
+    println!(
+        "Undid import {}: deleted {} password(s), {} account(s), {} site(s).",
+        args.id, counts.passwords, counts.accounts, counts.sites
+    );
+    Ok(())
 }
