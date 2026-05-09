@@ -2,6 +2,7 @@
 
 use crate::recovery::transformers::Transformer;
 use crate::recovery::{Candidate, RecoverContext, RuleId};
+use chrono::Datelike;
 use regex::Regex;
 use std::sync::OnceLock;
 use zeroize::Zeroizing;
@@ -42,8 +43,23 @@ impl Transformer for NumberIncrement {
                 }
             }
         } else {
-            // No trailing digits — just append the top years.
-            for y in &top_years {
+            // No trailing digits — append top-3 years from stats AND every year in
+            // the era window (when set), so a candidate produced inside an era
+            // can pick up the right year suffix even if that year is not in
+            // the top-3 stats. Bounded by MAX_OUT.
+            let mut years_to_try: Vec<u16> = top_years.clone();
+            if let Some((start, end)) = ctx.pool.era_window {
+                let start_y = start.year() as u16;
+                let end_y = end.year() as u16;
+                let lo = start_y.saturating_sub(1);
+                let hi = end_y.saturating_add(1);
+                for y in lo..=hi {
+                    if !years_to_try.contains(&y) {
+                        years_to_try.push(y);
+                    }
+                }
+            }
+            for y in &years_to_try {
                 let v = format!("{src}{y}");
                 push(&mut out, c, &v);
                 if out.len() >= MAX_OUT { return out; }
@@ -134,5 +150,28 @@ mod tests {
             // Should never produce x-1, x-2, etc. (negatives skipped).
             assert!(!o.password.as_str().contains('-'));
         }
+    }
+
+    #[test]
+    fn appends_era_window_years() {
+        use chrono::NaiveDate;
+        let p = Pool {
+            seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![],
+            era_window: Some((
+                NaiveDate::from_ymd_opt(2016, 1, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2019, 12, 31).unwrap(),
+            )),
+        };
+        let s = HistoryStats::default(); // no stats years
+        let c = RecoverConfig::default();
+        let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let out = NumberIncrement.transform(&cand, &rc(&p, &s, &c));
+        let strs: Vec<String> = out.iter().map(|x| x.password.as_str().to_string()).collect();
+        // Era window 2016-2019 with a 1-year buffer on each side -> 2015..=2020.
+        assert!(strs.contains(&"plain2015".to_string()), "expected 'plain2015'; got {strs:?}");
+        assert!(strs.contains(&"plain2017".to_string()), "expected 'plain2017'; got {strs:?}");
+        assert!(strs.contains(&"plain2018".to_string()), "expected 'plain2018'; got {strs:?}");
+        assert!(strs.contains(&"plain2019".to_string()), "expected 'plain2019'; got {strs:?}");
+        assert!(strs.contains(&"plain2020".to_string()), "expected 'plain2020'; got {strs:?}");
     }
 }
