@@ -56,24 +56,44 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
             fan.extend(new);
             dedup_exact(&mut fan);
             if fan.len() > MAX_INTERMEDIATE {
-                // Stats-aware truncation: rank candidates by ranking::score (the same
-                // function used for the final sort), so candidates that align with the
-                // user's pattern stats survive the cap regardless of provenance length.
-                // Hint match is automatically weighted via W_HINT × 1.0 = 0.25 in
-                // ranking::score, removing the need for a separate hint partition.
+                // Hybrid truncation: keep all hint-matched candidates (so in-progress
+                // chains like "MoonBeam$2019" survive intermediate truncation even
+                // though they end in digits and score low under raw stats alignment),
+                // but order WITHIN the hint partition by ranking::score (so the
+                // most-promising hint-matched candidates rank highest if forced to
+                // truncate within the group). Stats-aware ranking + hint-partition
+                // protection both pull their weight: pure stats-aware would prune
+                // mid-chain candidates that don't yet match user patterns; pure
+                // hint-partition would let weak hint-matched candidates crowd out
+                // strong non-hint ones (rare but possible).
                 //
-                // Compute scores once into Candidate.score, then sort by the cached
-                // f32 — sorting with ranking::score in the comparator would call it
-                // O(N log N) times (2 calls per compare × 12k × log(12k) ≈ 334k calls
-                // per cap firing × 10 firings = 3.34M calls total, blowing the perf
-                // budget by 7x). Caching cuts that to N calls per firing.
+                // Score is cached on Candidate.score (which exists already as f32);
+                // sorting with ranking::score in the comparator would call it
+                // O(N log N) times (~3M calls per recover() invocation; perf budget
+                // breached). Caching cuts that to N calls per firing.
                 for c in fan.iter_mut() {
                     c.score = ranking::score(c, &ctx);
                 }
-                fan.sort_by(|a, b| {
+                let by_score = |a: &Candidate, b: &Candidate| {
                     b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-                });
-                fan.truncate(MAX_INTERMEDIATE);
+                };
+                let hint_lower = ctx.config.hint.as_ref().map(|h| h.to_lowercase());
+                let (mut hint_matched, mut others): (Vec<Candidate>, Vec<Candidate>) =
+                    fan.into_iter().partition(|c| match &hint_lower {
+                        Some(h) => c.password.to_lowercase().contains(h),
+                        None => false,
+                    });
+                if hint_matched.len() >= MAX_INTERMEDIATE {
+                    hint_matched.sort_by(&by_score);
+                    hint_matched.truncate(MAX_INTERMEDIATE);
+                    fan = hint_matched;
+                } else {
+                    let remaining = MAX_INTERMEDIATE - hint_matched.len();
+                    others.sort_by(&by_score);
+                    others.truncate(remaining);
+                    hint_matched.extend(others);
+                    fan = hint_matched;
+                }
             }
         }
     }
