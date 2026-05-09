@@ -165,15 +165,23 @@ pub fn build(vault: &Vault, cfg: &RecoverConfig) -> Result<Pool> {
         }
     }
 
-    // Pull base words.
+    // Pull base words. Each entry exposes both lowercase canonical (for hint
+    // matching, dedup, etc.) and the reconstructed original casing (for
+    // BaseWordPool / WordCombine to emit as a privileged seed variant).
     let bw = base_words::fetch_decrypted(vault)?;
-    let mut favorite_base_words: Vec<Zeroizing<String>> = Vec::new();
-    let mut all_base_words: Vec<Zeroizing<String>> = Vec::new();
+    let mut favorite_base_words: Vec<crate::recovery::DecryptedBaseWordEntry> = Vec::new();
+    let mut all_base_words: Vec<crate::recovery::DecryptedBaseWordEntry> = Vec::new();
     for w in bw {
+        let canonical = w.word.as_str().to_owned();
+        let original = base_words::apply_casing_mask(&canonical, w.casing_mask);
+        let entry = crate::recovery::DecryptedBaseWordEntry {
+            canonical: Zeroizing::new(canonical),
+            original: Zeroizing::new(original),
+        };
         if w.is_favorite {
-            favorite_base_words.push(Zeroizing::new(w.word.as_str().to_owned()));
+            favorite_base_words.push(entry.clone());
         }
-        all_base_words.push(Zeroizing::new(w.word.as_str().to_owned()));
+        all_base_words.push(entry);
     }
 
     Ok(Pool {

@@ -14,10 +14,10 @@ impl Generator for WordCombine {
 
     fn generate(&self, ctx: &RecoverContext<'_>) -> Vec<Candidate> {
         let mut out: Vec<Candidate> = Vec::new();
-        let favorites: Vec<&str> = ctx.pool.favorite_base_words.iter().map(|w| w.as_str()).collect();
+        let favorites: Vec<&str> = ctx.pool.favorite_base_words.iter().map(|w| w.canonical.as_str()).collect();
         // Top 20 non-favorites (by repo order, which is usage_count desc).
         let non_fav: Vec<&str> = ctx.pool.all_base_words.iter()
-            .map(|w| w.as_str())
+            .map(|w| w.canonical.as_str())
             .filter(|w| !favorites.contains(w))
             .take(20)
             .collect();
@@ -73,9 +73,16 @@ fn title_case(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recovery::{HistoryStats, Pool, RecoverConfig};
+    use crate::recovery::{DecryptedBaseWordEntry, HistoryStats, Pool, RecoverConfig};
     use crate::vault::Vault;
     use tempfile::TempDir;
+
+    fn entry(s: &str) -> DecryptedBaseWordEntry {
+        DecryptedBaseWordEntry {
+            canonical: Zeroizing::new(s.to_string()),
+            original: Zeroizing::new(s.to_string()),
+        }
+    }
 
     fn dummy_vault() -> &'static Vault {
         // Vault contains rusqlite::Connection (not Sync), so OnceLock<Vault>
@@ -95,8 +102,8 @@ mod tests {
     fn combines_two_favorites_with_all_seps_and_cases() {
         let pool = Pool {
             seeds: vec![],
-            favorite_base_words: vec![Zeroizing::new("blue".into()), Zeroizing::new("fish".into())],
-            all_base_words: vec![Zeroizing::new("blue".into()), Zeroizing::new("fish".into())],
+            favorite_base_words: vec![entry("blue"), entry("fish")],
+            all_base_words: vec![entry("blue"), entry("fish")],
             site_abbreviations: vec![], era_window: None,
         };
         let stats = HistoryStats::default();
@@ -114,7 +121,7 @@ mod tests {
     #[test]
     fn caps_at_max_outputs() {
         // Generate enough favorites that the cartesian product would exceed the cap.
-        let favs: Vec<Zeroizing<String>> = (0..30).map(|i| Zeroizing::new(format!("w{i}"))).collect();
+        let favs: Vec<DecryptedBaseWordEntry> = (0..30).map(|i| entry(&format!("w{i}"))).collect();
         let pool = Pool {
             seeds: vec![],
             favorite_base_words: favs.clone(),

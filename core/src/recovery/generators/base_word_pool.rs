@@ -22,7 +22,7 @@ impl Generator for BaseWordPool {
             for _ in 0..3 {
                 if out.len() >= MAX_OUTPUTS { return out; }
                 out.push(Candidate {
-                    password: Zeroizing::new(w.as_str().to_owned()),
+                    password: Zeroizing::new(w.canonical.as_str().to_owned()),
                     score: 0.0,
                     provenance: vec![RuleId::BaseWordPool],
                     seed_history_id: None,
@@ -34,9 +34,9 @@ impl Generator for BaseWordPool {
         for w in &ctx.pool.all_base_words {
             if out.len() >= MAX_OUTPUTS { break; }
             // Skip exact duplicates of favorites already pushed.
-            if out.iter().any(|c| c.password.as_str() == w.as_str()) { continue; }
+            if out.iter().any(|c| c.password.as_str() == w.canonical.as_str()) { continue; }
             out.push(Candidate {
-                password: Zeroizing::new(w.as_str().to_owned()),
+                password: Zeroizing::new(w.canonical.as_str().to_owned()),
                 score: 0.0,
                 provenance: vec![RuleId::BaseWordPool],
                 seed_history_id: None,
@@ -49,9 +49,16 @@ impl Generator for BaseWordPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recovery::{HistoryStats, Pool, RecoverConfig};
+    use crate::recovery::{DecryptedBaseWordEntry, HistoryStats, Pool, RecoverConfig};
     use crate::vault::Vault;
     use tempfile::TempDir;
+
+    fn entry(s: &str) -> DecryptedBaseWordEntry {
+        DecryptedBaseWordEntry {
+            canonical: Zeroizing::new(s.to_string()),
+            original: Zeroizing::new(s.to_string()),
+        }
+    }
 
     fn dummy_vault() -> &'static Vault {
         // We only need a Vault reference for the context; tests don't touch SQL.
@@ -67,12 +74,8 @@ mod tests {
     fn emits_favorites_first() {
         let pool = Pool {
             seeds: vec![],
-            favorite_base_words: vec![Zeroizing::new("apple".into()), Zeroizing::new("banana".into())],
-            all_base_words: vec![
-                Zeroizing::new("apple".into()),
-                Zeroizing::new("banana".into()),
-                Zeroizing::new("cherry".into()),
-            ],
+            favorite_base_words: vec![entry("apple"), entry("banana")],
+            all_base_words: vec![entry("apple"), entry("banana"), entry("cherry")],
             site_abbreviations: vec![],
             era_window: None,
         };
@@ -89,7 +92,7 @@ mod tests {
 
     #[test]
     fn caps_at_max_outputs() {
-        let many: Vec<Zeroizing<String>> = (0..200).map(|i| Zeroizing::new(format!("word{i}"))).collect();
+        let many: Vec<DecryptedBaseWordEntry> = (0..200).map(|i| entry(&format!("word{i}"))).collect();
         let pool = Pool {
             seeds: vec![],
             favorite_base_words: vec![],
@@ -108,8 +111,8 @@ mod tests {
     fn provenance_marks_base_word_pool() {
         let pool = Pool {
             seeds: vec![],
-            favorite_base_words: vec![Zeroizing::new("x".into())],
-            all_base_words: vec![Zeroizing::new("x".into())],
+            favorite_base_words: vec![entry("x")],
+            all_base_words: vec![entry("x")],
             site_abbreviations: vec![],
             era_window: None,
         };

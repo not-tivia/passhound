@@ -36,7 +36,7 @@ fn pattern_freq_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
 
 fn contains_any_favorite(c: &Candidate, ctx: &RecoverContext<'_>) -> bool {
     let lower = c.password.to_lowercase();
-    ctx.pool.favorite_base_words.iter().any(|w| lower.contains(&w.to_lowercase()))
+    ctx.pool.favorite_base_words.iter().any(|w| lower.contains(w.canonical.as_str()))
 }
 
 fn length_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
@@ -48,7 +48,7 @@ fn length_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recovery::{HistoryStats, Pool, PoolSeed, RecoverConfig};
+    use crate::recovery::{DecryptedBaseWordEntry, HistoryStats, Pool, PoolSeed, RecoverConfig};
     use crate::vault::Vault;
     use chrono::Utc;
     use std::collections::HashMap;
@@ -123,8 +123,14 @@ mod tests {
     fn favorite_base_word_contributes() {
         let p = Pool {
             seeds: vec![],
-            favorite_base_words: vec![Zeroizing::new("fluffy".into())],
-            all_base_words: vec![Zeroizing::new("fluffy".into())],
+            favorite_base_words: vec![DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("fluffy".into()),
+                original: Zeroizing::new("fluffy".into()),
+            }],
+            all_base_words: vec![DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("fluffy".into()),
+                original: Zeroizing::new("fluffy".into()),
+            }],
             site_abbreviations: vec![], era_window: None,
         };
         let s = HistoryStats::default();

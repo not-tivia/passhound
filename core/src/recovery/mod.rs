@@ -90,11 +90,19 @@ pub struct RecoverContext<'a> {
     pub stats: &'a HistoryStats,
 }
 
+/// One base word in the pool: lowercase canonical for matching plus the
+/// reconstructed original casing (or canonical itself if mask=0).
+#[derive(Debug, Clone)]
+pub struct DecryptedBaseWordEntry {
+    pub canonical: Zeroizing<String>,
+    pub original: Zeroizing<String>,
+}
+
 /// Filtered subset of password_history + base_words used for generation.
 pub struct Pool {
     pub seeds: Vec<PoolSeed>,
-    pub favorite_base_words: Vec<Zeroizing<String>>,
-    pub all_base_words: Vec<Zeroizing<String>>,
+    pub favorite_base_words: Vec<DecryptedBaseWordEntry>,
+    pub all_base_words: Vec<DecryptedBaseWordEntry>,
     pub site_abbreviations: Vec<String>,
     pub era_window: Option<(NaiveDate, NaiveDate)>,
 }
