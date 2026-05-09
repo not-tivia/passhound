@@ -61,10 +61,17 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
                 // user's pattern stats survive the cap regardless of provenance length.
                 // Hint match is automatically weighted via W_HINT × 1.0 = 0.25 in
                 // ranking::score, removing the need for a separate hint partition.
+                //
+                // Compute scores once into Candidate.score, then sort by the cached
+                // f32 — sorting with ranking::score in the comparator would call it
+                // O(N log N) times (2 calls per compare × 12k × log(12k) ≈ 334k calls
+                // per cap firing × 10 firings = 3.34M calls total, blowing the perf
+                // budget by 7x). Caching cuts that to N calls per firing.
+                for c in fan.iter_mut() {
+                    c.score = ranking::score(c, &ctx);
+                }
                 fan.sort_by(|a, b| {
-                    let sa = ranking::score(a, &ctx);
-                    let sb = ranking::score(b, &ctx);
-                    sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                    b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
                 });
                 fan.truncate(MAX_INTERMEDIATE);
             }
