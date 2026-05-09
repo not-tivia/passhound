@@ -56,34 +56,17 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
             fan.extend(new);
             dedup_exact(&mut fan);
             if fan.len() > MAX_INTERMEDIATE {
-                // Hint-partitioned truncation: candidates whose password contains
-                // the hint substring (case-insensitive) are preserved as a group;
-                // remaining cap is filled with top non-hint candidates by promise.
-                // This keeps short hint-matched candidates (e.g. "MoonBeam$2019",
-                // provenance length 3) alive across the cap, so the next pass's
-                // SiteAffix can extend them into the full compound pattern.
-                let by_promise = |a: &Candidate, b: &Candidate| {
-                    let pa = promise_score(a, &ctx);
-                    let pb = promise_score(b, &ctx);
-                    pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
-                };
-                let hint_lower = ctx.config.hint.as_ref().map(|h| h.to_lowercase());
-                let (mut hint_matched, mut others): (Vec<Candidate>, Vec<Candidate>) =
-                    fan.into_iter().partition(|c| match &hint_lower {
-                        Some(h) => c.password.to_lowercase().contains(h),
-                        None => false,
-                    });
-                if hint_matched.len() >= MAX_INTERMEDIATE {
-                    hint_matched.sort_by(&by_promise);
-                    hint_matched.truncate(MAX_INTERMEDIATE);
-                    fan = hint_matched;
-                } else {
-                    let remaining = MAX_INTERMEDIATE - hint_matched.len();
-                    others.sort_by(&by_promise);
-                    others.truncate(remaining);
-                    hint_matched.extend(others);
-                    fan = hint_matched;
-                }
+                // Stats-aware truncation: rank candidates by ranking::score (the same
+                // function used for the final sort), so candidates that align with the
+                // user's pattern stats survive the cap regardless of provenance length.
+                // Hint match is automatically weighted via W_HINT × 1.0 = 0.25 in
+                // ranking::score, removing the need for a separate hint partition.
+                fan.sort_by(|a, b| {
+                    let sa = ranking::score(a, &ctx);
+                    let sb = ranking::score(b, &ctx);
+                    sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                fan.truncate(MAX_INTERMEDIATE);
             }
         }
     }
@@ -251,15 +234,18 @@ mod tests {
         assert_eq!(strs.len(), out.len());
     }
 
-    // Phase 3.5 architectural fix smoke test. Currently #[ignore]d because
-    // the synthetic vault used here has stats biased toward 4-trailing-digit
-    // patterns (only Amazon's MoonBeam$2018 entries), which makes the freq
-    // score favor leet-swapped digit-ending chains over the alphabetic-ending
-    // target. The real validation lives in the fixture-driven integration
-    // tests (`recovery_finds_known_answer_with_full_hints` and
-    // `recovery_finds_with_partial_hints`) which use a 30-entry fixture with
-    // representative trailing-alphabetic stats. Keep this test for future
-    // rework if/when stats-aware promise scoring lands.
+    // Phase 3.5 architectural fix smoke test. Stays #[ignore]d through Phase 3.6
+    // because the synthetic vault used here has stats biased toward 4-trailing-digit
+    // patterns (only Amazon's MoonBeam$2016/2018 entries give freq[4]=1.0), which
+    // makes the freq score favor leet-swapped digit-ending chains over the
+    // alphabetic-ending target. Phase 3.6 added stats-aware cap truncation, but
+    // the test's vault is genuinely unrepresentative — even with stats-aware
+    // truncation, "MoonBeam$2019Rd" scores freq=0 here by construction. Rewriting
+    // the synthetic vault to align with the fixture's stats would essentially
+    // duplicate the integration tests. The real validation lives in the
+    // fixture-driven integration tests (`recovery_finds_known_answer_with_full_hints`
+    // and `recovery_finds_with_partial_hints`) which use a 30-entry fixture with
+    // representative trailing-alphabetic stats.
     #[ignore = "stats-biased fixture; integration tests are the real validation"]
     #[test]
     fn multi_pass_produces_compound_pattern() {
