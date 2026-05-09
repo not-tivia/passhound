@@ -1,0 +1,1 @@
+ALTER TABLE base_words ADD COLUMN casing_mask INTEGER NOT NULL DEFAULT 0;
