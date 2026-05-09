@@ -95,6 +95,63 @@ Every import gets a numeric id printed after `--commit`. To reverse it
 Imports default to `confidence: uncertain`. Source rows are tagged with the
 import id via the `password_history.source_import_id` column.
 
+## Recovering forgotten passwords
+
+When you can't remember a password for one of your own accounts, PassHound can
+generate a ranked list of candidates derived entirely from your own history.
+The tool NEVER touches the network — it just prints candidates; you copy and
+try them manually.
+
+### Setup (one-time)
+
+```bash
+# Tokenize all imported password history into base_words and auto-favorite the top 10.
+./target/release/passhound analyze
+
+# Inspect what was extracted; promote/demote favorites as needed (manual flags
+# are preserved across future `analyze` re-runs).
+./target/release/passhound base-word list
+./target/release/passhound base-word promote 12
+./target/release/passhound base-word demote 5
+
+# Define your life eras.
+./target/release/passhound era add --name "RuneScape years" --start 2010-01-01 --end 2015-12-31
+./target/release/passhound era add --name "College" --start 2016-01-01 --end 2019-12-31
+./target/release/passhound era add --name "Modern" --start 2020-01-01
+./target/release/passhound era list
+```
+
+### Generating candidates
+
+```bash
+# Top 100 candidates with full hints.
+./target/release/passhound recover --site Reddit --era College --hint moon
+
+# Loose hints — just a partial recollection.
+./target/release/passhound recover --hint flu
+
+# Tighten constraints.
+./target/release/passhound recover --hint thunder --min-length 12 --require-symbol
+```
+
+### Output
+
+```
+RANK  SCORE  CANDIDATE                      WHY
+1     0.92   MoonBeam$2019Rd                G+E+F+H: BaseWordPool + SiteAffix + NumberIncrement + EraBoost
+2     0.88   MoonBeam$2018Rd                G+E+F+H: BaseWordPool + SiteAffix + NumberIncrement + EraBoost
+...
+```
+
+- `RANK` is the position (1-based) in the ranked list.
+- `SCORE` is the weighted-sum score; higher is more confidently a match.
+- `CANDIDATE` is the password to try.
+- `WHY` lists the rules that produced it. Tag letters mirror the project's pattern letters (B=special-suffix, D=word-combine, E=site-affix, F=number-increment, G=base-word-pool, H=era-boost, plus CASE and LEET).
+
+### Hard guardrail
+
+The recovery tool does not and will never make network requests against third-party services. It produces candidates; you try them manually.
+
 ## Threat model (Phase 1)
 
 - The vault file is encrypted such that password ciphertext requires the master password to read.
