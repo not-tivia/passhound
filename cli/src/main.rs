@@ -30,6 +30,8 @@ enum Command {
     Recover(commands::recover::RecoverArgs),
     /// Tokenize password history and populate base_words.
     Analyze(commands::analyze::AnalyzeArgs),
+    /// Manage base words extracted by `analyze`.
+    BaseWord(commands::base_word::BaseWordArgs),
 }
 
 fn default_vault_path() -> PathBuf {
@@ -49,5 +51,6 @@ fn main() -> anyhow::Result<()> {
         Command::Import(args) => commands::import::run(&vault_path, args),
         Command::Recover(args) => commands::recover::run(&vault_path, args),
         Command::Analyze(args) => commands::analyze::run(&vault_path, args),
+        Command::BaseWord(args) => commands::base_word::run(&vault_path, args),
     }
 }
