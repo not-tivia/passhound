@@ -13,10 +13,14 @@ pub trait Transformer: Sync {
     fn transform(&self, c: &Candidate, ctx: &RecoverContext<'_>) -> Vec<Candidate>;
 }
 
+// Transformer firing order is significant: NumberIncrement runs BEFORE SiteAffix
+// so the chain `<base><symbol><year><abbrev>` (e.g. "MoonBeam$2019Rd") composes
+// in a single pass. With SiteAffix first, the abbrev gets attached before any
+// year exists, blocking that pattern.
 pub static TRANSFORMERS: &[&'static dyn Transformer] = &[
     &case_variations::CaseVariations,
     &special_suffix::SpecialSuffix,
-    &site_affix::SiteAffix,
     &number_increment::NumberIncrement,
+    &site_affix::SiteAffix,
     &leet_swap::LeetSwap,
 ];

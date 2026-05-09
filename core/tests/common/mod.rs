@@ -76,15 +76,15 @@ pub fn build_vault_from_fixture() -> (tempfile::TempDir, Vault, Vec<Entry>) {
         eras::add(&v, &e.name, start, end, None).unwrap();
     }
 
-    // Entries (non-answer).
+    // Entries: create the site row for every entry (including is_answer) so the
+    // recovery pipeline's name-matched-abbreviation pre-query can find the
+    // answer's site declaration. Skip inserting the PASSWORD row for is_answer
+    // entries — that's what makes them "hidden" answers.
     let mut answers: Vec<Entry> = Vec::new();
     let mut sites_cache: HashMap<String, i64> = HashMap::new();
     let mut accounts_cache: HashMap<(i64, String), i64> = HashMap::new();
     for entry in fx.entries {
-        if entry.is_answer {
-            answers.push(entry);
-            continue;
-        }
+        // Always create the site row so its abbreviations and category are visible.
         let site_id = *sites_cache.entry(entry.site.clone()).or_insert_with(|| {
             let s = sites::create(&v, NewSite {
                 name: entry.site.clone(),
@@ -95,6 +95,10 @@ pub fn build_vault_from_fixture() -> (tempfile::TempDir, Vault, Vec<Entry>) {
             }).unwrap();
             s.id
         });
+        if entry.is_answer {
+            answers.push(entry);
+            continue;
+        }
         let username_key = entry.username.clone().unwrap_or_default();
         let account_id = *accounts_cache.entry((site_id, username_key.clone())).or_insert_with(|| {
             let a = accounts::create(&v, NewAccount {

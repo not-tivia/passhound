@@ -53,14 +53,21 @@ pub fn build(vault: &Vault, cfg: &RecoverConfig) -> Result<Pool> {
     let target_site_lower = cfg.site.as_ref().map(|s| s.to_lowercase());
     let target_account_lower = cfg.account.as_ref().map(|s| s.to_lowercase());
 
-    // First pass: identify the primary matched-site category, if any.
-    let primary_category: Option<String> = if let Some(target) = &target_site_lower {
-        rows.iter()
-            .find(|(_, _, _, _, _, _, _, name, _, _)| name.to_lowercase() == *target)
-            .and_then(|(_, _, _, _, _, _, _, _, cat, _)| cat.clone())
+    // First pass: identify the primary matched-site category, if any. Query the
+    // sites table directly (not the JOIN above) so a name-matched site with no
+    // password rows still contributes its category to the same-category fallback.
+    let primary_category: Option<String> = if let Some(target) = &cfg.site {
+        let mut stmt = vault.conn().prepare(
+            "SELECT category FROM sites WHERE LOWER(name) = LOWER(?1) LIMIT 1",
+        )?;
+        stmt.query_row(params![target], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
     } else {
         None
     };
+    // Used by the per-row site classification below.
+    let _ = &target_site_lower;
 
     let mut seeds: Vec<PoolSeed> = Vec::new();
     let mut site_abbrev_set: Vec<String> = Vec::new();
