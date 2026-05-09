@@ -31,10 +31,11 @@ pub fn extract_base_words_from_history(vault: &Vault, top_favorites: usize) -> R
     let mut agg: HashMap<String, Aggregate> = HashMap::new();
     for (created_at, plaintext) in &history {
         for token in tokenize(plaintext.as_str()) {
-            let entry = agg.entry(token).or_insert(Aggregate {
+            let entry = agg.entry(token.canonical).or_insert(Aggregate {
                 count: 0,
                 first_seen: *created_at,
                 last_seen: *created_at,
+                casing_mask: token.casing_mask,
             });
             entry.count += 1;
             if *created_at < entry.first_seen { entry.first_seen = *created_at; }
@@ -87,6 +88,7 @@ struct Aggregate {
     count: usize,
     first_seen: DateTime<Utc>,
     last_seen: DateTime<Utc>,
+    casing_mask: u64,
 }
 
 fn insert_encrypted(
@@ -129,11 +131,24 @@ fn decrypt_all_history(vault: &Vault) -> Result<Vec<(DateTime<Utc>, Zeroizing<St
     Ok(out)
 }
 
-/// Tokenize a password into candidate base words.
-/// Rules: lowercase, strip digits and symbols (replace with spaces), split camelCase /
-/// snake_case / dashes, keep tokens with len in [4, 24]. Drop pure-digit tokens.
-pub fn tokenize(password: &str) -> Vec<String> {
-    // Insert space at every camelCase boundary first.
+/// One tokenized base-word candidate plus its first-seen casing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    /// Lowercase canonical form, used as the dedup key in analyze and the
+    /// stored ciphertext in base_words.
+    pub canonical: String,
+    /// Bitmask: bit `i` = 1 if char `i` of `canonical` is uppercase in the
+    /// password fragment that produced this token. See
+    /// `repo::base_words::apply_casing_mask` for reconstruction.
+    pub casing_mask: u64,
+}
+
+/// Tokenize a password into candidate base words plus first-seen casing.
+/// Rules: insert spaces at camelCase boundaries, replace digits and symbols
+/// with spaces, keep alphabetic tokens with len in [4, 24]. The original
+/// casing of each token segment (before lowercasing) becomes its bitmask.
+pub fn tokenize(password: &str) -> Vec<Token> {
+    // Step 1: insert a space at every camelCase boundary so MoonBeam → "Moon Beam".
     let mut camel_split = String::with_capacity(password.len() + 4);
     let chars: Vec<char> = password.chars().collect();
     for (i, c) in chars.iter().enumerate() {
@@ -142,13 +157,20 @@ pub fn tokenize(password: &str) -> Vec<String> {
         }
         camel_split.push(*c);
     }
-    let lower = camel_split.to_lowercase();
-    // Replace every non-letter with space.
-    let cleaned: String = lower.chars().map(|c| if c.is_ascii_lowercase() { c } else { ' ' }).collect();
+    // Step 2: replace every non-alphabetic char with a space (preserving case).
+    let cleaned: String = camel_split
+        .chars()
+        .map(|c| if c.is_ascii_alphabetic() { c } else { ' ' })
+        .collect();
+    // Step 3: emit each whitespace-separated segment as a Token.
     cleaned
         .split_whitespace()
         .filter(|t| t.chars().count() >= 4 && t.chars().count() <= 24)
-        .map(|s| s.to_string())
+        .map(|original| {
+            let canonical: String = original.chars().flat_map(|c| c.to_lowercase()).collect();
+            let casing_mask = crate::repo::base_words::compute_casing_mask(original);
+            Token { canonical, casing_mask }
+        })
         .collect()
 }
 
@@ -168,16 +190,46 @@ mod tests {
 
     #[test]
     fn tokenize_basics() {
-        assert_eq!(tokenize("Fluffy!2014"), vec!["fluffy"]);
-        assert_eq!(tokenize("MoonBeam$2018"), vec!["moon", "beam"]);
-        assert_eq!(tokenize("hi!"), Vec::<String>::new(), "tokens shorter than 4 are dropped");
-        assert_eq!(tokenize("Thunder!@#2020"), vec!["thunder"]);
-        assert_eq!(tokenize("snake_case_word"), vec!["snake", "case", "word"]);
+        let canonicals = |s: &str| -> Vec<String> {
+            tokenize(s).into_iter().map(|t| t.canonical).collect()
+        };
+        assert_eq!(canonicals("Fluffy!2014"), vec!["fluffy"]);
+        assert_eq!(canonicals("MoonBeam$2018"), vec!["moon", "beam"]);
+        assert_eq!(canonicals("hi!"), Vec::<String>::new(), "tokens shorter than 4 are dropped");
+        assert_eq!(canonicals("Thunder!@#2020"), vec!["thunder"]);
+        assert_eq!(canonicals("snake_case_word"), vec!["snake", "case", "word"]);
     }
 
     #[test]
     fn tokenize_drops_pure_digits_and_short_tokens() {
-        assert_eq!(tokenize("a 12345 abcd"), vec!["abcd"]);
+        let canonicals: Vec<String> = tokenize("a 12345 abcd").into_iter().map(|t| t.canonical).collect();
+        assert_eq!(canonicals, vec!["abcd"]);
+    }
+
+    #[test]
+    fn tokenize_captures_casing_mask() {
+        let toks = tokenize("MoonBeam$2018");
+        assert_eq!(toks.len(), 2);
+        assert_eq!(toks[0].canonical, "moon");
+        assert_eq!(toks[0].casing_mask, 0b0001, "first char of 'Moon' is upper");
+        assert_eq!(toks[1].canonical, "beam");
+        assert_eq!(toks[1].casing_mask, 0b0001, "first char of 'Beam' is upper");
+    }
+
+    #[test]
+    fn tokenize_lowercase_input_yields_zero_mask() {
+        let toks = tokenize("fluffy!2014");
+        assert_eq!(toks.len(), 1);
+        assert_eq!(toks[0].canonical, "fluffy");
+        assert_eq!(toks[0].casing_mask, 0);
+    }
+
+    #[test]
+    fn tokenize_uppercase_input_yields_full_mask() {
+        let toks = tokenize("FLUFFY!2014");
+        assert_eq!(toks.len(), 1);
+        assert_eq!(toks[0].canonical, "fluffy");
+        assert_eq!(toks[0].casing_mask, 0b00111111);
     }
 
     #[test]
