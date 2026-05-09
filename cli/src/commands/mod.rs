@@ -1,6 +1,7 @@
 pub mod add;
 pub mod analyze;
 pub mod base_word;
+pub mod era;
 pub mod get;
 pub mod import;
 pub mod init;

@@ -648,6 +648,7 @@ name = "passhound-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "csv",
  "directories",

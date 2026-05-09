@@ -32,6 +32,8 @@ enum Command {
     Analyze(commands::analyze::AnalyzeArgs),
     /// Manage base words extracted by `analyze`.
     BaseWord(commands::base_word::BaseWordArgs),
+    /// Manage user-defined life eras.
+    Era(commands::era::EraArgs),
 }
 
 fn default_vault_path() -> PathBuf {
@@ -52,5 +54,6 @@ fn main() -> anyhow::Result<()> {
         Command::Recover(args) => commands::recover::run(&vault_path, args),
         Command::Analyze(args) => commands::analyze::run(&vault_path, args),
         Command::BaseWord(args) => commands::base_word::run(&vault_path, args),
+        Command::Era(args) => commands::era::run(&vault_path, args),
     }
 }
