@@ -5,6 +5,7 @@ use crate::recovery::{Candidate, RecoverContext};
 pub mod case_variations;
 pub mod special_suffix;
 pub mod site_affix;
+pub mod number_increment;
 
 pub trait Transformer: Sync {
     fn name(&self) -> &'static str;
@@ -15,4 +16,5 @@ pub static TRANSFORMERS: &[&'static dyn Transformer] = &[
     &case_variations::CaseVariations,
     &special_suffix::SpecialSuffix,
     &site_affix::SiteAffix,
+    &number_increment::NumberIncrement,
 ];
