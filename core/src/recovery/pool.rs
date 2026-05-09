@@ -65,6 +65,30 @@ pub fn build(vault: &Vault, cfg: &RecoverConfig) -> Result<Pool> {
     let mut seeds: Vec<PoolSeed> = Vec::new();
     let mut site_abbrev_set: Vec<String> = Vec::new();
 
+    // P3: pull abbreviations from any sites row whose name matches cfg.site
+    // (case-insensitive), independent of whether any password rows from that
+    // site survive the era + decrypt pipeline. This catches the case where
+    // the answer site exists in `sites` but its passwords are excluded
+    // (era-filtered or otherwise) — its declared abbreviations are the
+    // exact ones the user uses for that site.
+    if let Some(target) = &cfg.site {
+        let mut stmt = vault.conn().prepare(
+            "SELECT abbreviations FROM sites WHERE LOWER(name) = LOWER(?1)",
+        )?;
+        let rows: Vec<String> = stmt
+            .query_map(params![target], |r| r.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        for abbr_json in rows {
+            let abbreviations: Vec<String> = serde_json::from_str(&abbr_json).unwrap_or_default();
+            for a in abbreviations {
+                if !site_abbrev_set.iter().any(|x| x.eq_ignore_ascii_case(&a)) {
+                    site_abbrev_set.push(a);
+                }
+            }
+        }
+    }
+
     for (history_id, ct, nonce_vec, created_at_str, _account_id, username, site_id, site_name, category, abbr_json) in rows {
         // Account filter (substring on username).
         if let Some(needle) = &target_account_lower {
@@ -273,5 +297,62 @@ mod tests {
         let pool = build(&v, &cfg).unwrap();
         assert_eq!(pool.seeds.len(), 1);
         assert!((pool.seeds[0].site_match_strength - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn build_collects_abbrevs_from_name_matched_site_even_when_no_seeds_survive() {
+        use crate::repo::accounts::{self, NewAccount};
+        use crate::repo::eras;
+        use crate::repo::sites::{self, NewSite};
+        use chrono::{NaiveDate, TimeZone, Utc};
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("v.db");
+        let v = Vault::create(&path, b"hunter2").unwrap();
+
+        // Reddit site row exists with abbreviation "Rd". One password is in 2010
+        // (way outside the College era window we're going to filter on), and we
+        // do NOT add a row inside the College window — so when era filter fires,
+        // no Reddit seed survives. We expect the abbreviation "Rd" to still
+        // appear in pool.site_abbreviations because pool::build does a
+        // pre-query that pulls abbreviations from name-matched sites
+        // independent of seed survival.
+        let reddit = sites::create(&v, NewSite {
+            name: "Reddit".into(),
+            url: Some("reddit.com".into()),
+            category: Some("Social".into()),
+            abbreviations: vec!["Rd".into()],
+            notes: None,
+        }).unwrap();
+        let acct = accounts::create(&v, NewAccount { site_id: reddit.id, ..Default::default() }).unwrap();
+        crate::repo::passwords::insert(&v, crate::repo::passwords::NewPassword {
+            account_id: acct.id,
+            plaintext: "out-of-era-pw",
+            source: "manual".into(),
+            confidence: crate::repo::passwords::Confidence::Certain,
+            notes: None,
+            created_at: Some(Utc.with_ymd_and_hms(2010, 1, 1, 0, 0, 0).unwrap()),
+        }).unwrap();
+
+        eras::add(&v, "College",
+                  Some(NaiveDate::from_ymd_opt(2016, 1, 1).unwrap()),
+                  Some(NaiveDate::from_ymd_opt(2019, 12, 31).unwrap()),
+                  None).unwrap();
+
+        let cfg = RecoverConfig {
+            site: Some("Reddit".into()),
+            era_name: Some("College".into()),
+            ..Default::default()
+        };
+        let pool = build(&v, &cfg).unwrap();
+
+        // No Reddit seeds should survive the era filter:
+        assert!(pool.seeds.iter().all(|s| s.site_id != Some(reddit.id)),
+            "no Reddit seeds should survive era filter; got {:?}",
+            pool.seeds.iter().map(|s| s.site_id).collect::<Vec<_>>());
+        // But the abbreviation "Rd" should appear in site_abbreviations from the pre-query:
+        assert!(pool.site_abbreviations.iter().any(|a| a == "Rd"),
+            "expected 'Rd' in site_abbreviations; got {:?}", pool.site_abbreviations);
     }
 }
