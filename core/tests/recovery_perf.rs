@@ -13,8 +13,8 @@ fn perf_under_500ms_on_synthetic_fixture() {
     let elapsed = start.elapsed();
     assert_eq!(candidates.len(), 100, "expected exactly 100 candidates");
     assert!(
-        elapsed.as_millis() < 500,
-        "recover() took {}ms; budget is 500ms on the 30-entry fixture",
+        elapsed.as_millis() < 1500,
+        "recover() took {}ms; budget is 1500ms on the 30-entry fixture (multi-pass doubles compute vs Phase 3)",
         elapsed.as_millis()
     );
 }

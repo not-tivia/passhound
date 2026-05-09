@@ -11,7 +11,8 @@ use crate::vault::Vault;
 use std::collections::HashMap;
 
 const DEFAULT_LIMIT: usize = 100;
-const MAX_INTERMEDIATE: usize = 5_000;
+const MAX_INTERMEDIATE: usize = 12_000;
+const N_PASSES: usize = 2;
 
 pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate>> {
     if config.limit == 0 { config.limit = DEFAULT_LIMIT; }
@@ -41,23 +42,28 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
         });
     }
 
-    // Transformers, additive, with intermediate cap.
+    // Transformers, additive, with intermediate cap. Multi-pass (N_PASSES) so rules
+    // can compose: e.g. SpecialSuffix($) -> NumberIncrement(year) -> SiteAffix(abbrev)
+    // produces "MoonBeam$2019Rd", which a single pass cannot reach because rules
+    // fire in fixed order.
     let mut fan: Vec<Candidate> = seeds;
-    for t in TRANSFORMERS {
-        let mut new: Vec<Candidate> = Vec::new();
-        for c in &fan {
-            new.extend(t.transform(c, &ctx));
-        }
-        fan.extend(new);
-        dedup_exact(&mut fan);
-        if fan.len() > MAX_INTERMEDIATE {
-            // Promise score: provenance length * recency rank.
-            fan.sort_by(|a, b| {
-                let pa = promise_score(a, &ctx);
-                let pb = promise_score(b, &ctx);
-                pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            fan.truncate(MAX_INTERMEDIATE);
+    for _pass in 0..N_PASSES {
+        for t in TRANSFORMERS {
+            let mut new: Vec<Candidate> = Vec::new();
+            for c in &fan {
+                new.extend(t.transform(c, &ctx));
+            }
+            fan.extend(new);
+            dedup_exact(&mut fan);
+            if fan.len() > MAX_INTERMEDIATE {
+                // Promise score: provenance length * recency rank.
+                fan.sort_by(|a, b| {
+                    let pa = promise_score(a, &ctx);
+                    let pb = promise_score(b, &ctx);
+                    pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                fan.truncate(MAX_INTERMEDIATE);
+            }
         }
     }
 
@@ -125,7 +131,15 @@ fn promise_score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
         }
         None => 0.5,
     };
-    prov * recency
+    // Hint-biased: when cfg.hint is set, candidates whose password contains the
+    // hint substring (case-insensitive) get a 2x boost during intermediate
+    // truncation so they survive the cap. Without this, multi-pass can prune
+    // hint-relevant candidates in favor of high-provenance non-relevant chains.
+    let hint_match = match &ctx.config.hint {
+        Some(h) if c.password.to_lowercase().contains(&h.to_lowercase()) => 2.0,
+        _ => 1.0,
+    };
+    prov * recency * hint_match
 }
 
 fn satisfies_constraints(c: &Candidate, cfg: &RecoverConfig) -> bool {
@@ -214,5 +228,87 @@ mod tests {
         // Distinct strings only.
         let strs: std::collections::HashSet<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();
         assert_eq!(strs.len(), out.len());
+    }
+
+    #[test]
+    fn multi_pass_produces_compound_pattern() {
+        // Build a small vault with two favorite base words ("moon", "beam"), one
+        // existing site row "Reddit" with abbreviation "Rd", a few `$`-suffix
+        // history entries (so HistoryStats picks $ in trailing_symbol_freq), and
+        // an era window covering 2019. The vault has NO `MoonBeam$2019Rd` row;
+        // the test asserts the pipeline can synthesize it via multi-pass:
+        //   "moon" + "beam" -> WordCombine -> "MoonBeam"
+        //   -> SpecialSuffix($) -> "MoonBeam$"
+        //   -> NumberIncrement(era-aware) -> "MoonBeam$2019"
+        //   -> (next pass) SiteAffix(Rd) -> "MoonBeam$2019Rd"
+        use crate::repo::accounts::{self, NewAccount};
+        use crate::repo::eras;
+        use crate::repo::sites::{self, NewSite};
+        use chrono::{NaiveDate, TimeZone, Utc};
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("v.db");
+        let v = Vault::create(&path, b"hunter2").unwrap();
+
+        // Site rows.
+        let reddit = sites::create(&v, NewSite {
+            name: "Reddit".into(),
+            url: Some("reddit.com".into()),
+            category: Some("Social".into()),
+            abbreviations: vec!["Rd".into()],
+            notes: None,
+        }).unwrap();
+        let amazon = sites::create(&v, NewSite {
+            name: "Amazon".into(),
+            url: Some("amazon.com".into()),
+            category: Some("Shopping".into()),
+            abbreviations: vec!["AM".into()],
+            notes: None,
+        }).unwrap();
+
+        // Accounts.
+        let _reddit_acct = accounts::create(&v, NewAccount { site_id: reddit.id, ..Default::default() }).unwrap();
+        let amazon_acct = accounts::create(&v, NewAccount { site_id: amazon.id, ..Default::default() }).unwrap();
+
+        // Amazon entries with `$` and trailing digits — so HistoryStats picks up `$`
+        // as a trailing-symbol frequency signal (via the SpecialSuffix stats path)
+        // and trailing-digit / year frequencies.
+        for (pw, year) in [("MoonBeam$2016", 2016), ("MoonBeam$2018", 2018)] {
+            crate::repo::passwords::insert(&v, crate::repo::passwords::NewPassword {
+                account_id: amazon_acct.id,
+                plaintext: pw,
+                source: "manual".into(),
+                confidence: crate::repo::passwords::Confidence::Certain,
+                notes: None,
+                created_at: Some(Utc.with_ymd_and_hms(year, 6, 1, 0, 0, 0).unwrap()),
+            }).unwrap();
+        }
+
+        // Era covering 2019.
+        eras::add(&v, "College",
+                  Some(NaiveDate::from_ymd_opt(2016, 1, 1).unwrap()),
+                  Some(NaiveDate::from_ymd_opt(2019, 12, 31).unwrap()),
+                  None).unwrap();
+
+        // Run analyze so favorite base words appear ("moon", "beam" — top-2 by usage).
+        crate::recovery::extract_base_words_from_history(&v, 2).unwrap();
+
+        // Recover with full hints.
+        let cfg = RecoverConfig {
+            site: Some("Reddit".into()),
+            era_name: Some("College".into()),
+            hint: Some("moon".into()),
+            limit: 200,
+            ..Default::default()
+        };
+        let candidates = recover(&v, cfg).unwrap();
+        let strs: Vec<String> = candidates.iter().map(|c| c.password.as_str().to_string()).collect();
+        assert!(
+            strs.contains(&"MoonBeam$2019Rd".to_string()),
+            "expected 'MoonBeam$2019Rd' in candidates; got {} candidates, sample: {:?}",
+            strs.len(),
+            strs.iter().take(20).collect::<Vec<_>>(),
+        );
     }
 }
