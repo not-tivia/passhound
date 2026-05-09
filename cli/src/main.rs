@@ -26,6 +26,8 @@ enum Command {
     Get(commands::get::GetArgs),
     /// Import passwords from a file or pasted text.
     Import(commands::import::ImportArgs),
+    /// Generate ranked recovery candidates from your own history.
+    Recover(commands::recover::RecoverArgs),
 }
 
 fn default_vault_path() -> PathBuf {
@@ -43,5 +45,6 @@ fn main() -> anyhow::Result<()> {
         Command::List => commands::list::run(&vault_path),
         Command::Get(args) => commands::get::run(&vault_path, args),
         Command::Import(args) => commands::import::run(&vault_path, args),
+        Command::Recover(args) => commands::recover::run(&vault_path, args),
     }
 }
