@@ -56,13 +56,34 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
             fan.extend(new);
             dedup_exact(&mut fan);
             if fan.len() > MAX_INTERMEDIATE {
-                // Promise score: provenance length * recency rank.
-                fan.sort_by(|a, b| {
+                // Hint-partitioned truncation: candidates whose password contains
+                // the hint substring (case-insensitive) are preserved as a group;
+                // remaining cap is filled with top non-hint candidates by promise.
+                // This keeps short hint-matched candidates (e.g. "MoonBeam$2019",
+                // provenance length 3) alive across the cap, so the next pass's
+                // SiteAffix can extend them into the full compound pattern.
+                let by_promise = |a: &Candidate, b: &Candidate| {
                     let pa = promise_score(a, &ctx);
                     let pb = promise_score(b, &ctx);
                     pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
-                });
-                fan.truncate(MAX_INTERMEDIATE);
+                };
+                let hint_lower = ctx.config.hint.as_ref().map(|h| h.to_lowercase());
+                let (mut hint_matched, mut others): (Vec<Candidate>, Vec<Candidate>) =
+                    fan.into_iter().partition(|c| match &hint_lower {
+                        Some(h) => c.password.to_lowercase().contains(h),
+                        None => false,
+                    });
+                if hint_matched.len() >= MAX_INTERMEDIATE {
+                    hint_matched.sort_by(&by_promise);
+                    hint_matched.truncate(MAX_INTERMEDIATE);
+                    fan = hint_matched;
+                } else {
+                    let remaining = MAX_INTERMEDIATE - hint_matched.len();
+                    others.sort_by(&by_promise);
+                    others.truncate(remaining);
+                    hint_matched.extend(others);
+                    fan = hint_matched;
+                }
             }
         }
     }
