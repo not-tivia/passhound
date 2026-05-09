@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-05-08T00:00:00Z",
+  "notes": "Hand-written synthetic history exercising recovery rules. NO real passwords.",
+  "eras": [
+    { "name": "RuneScape years", "start": "2010-01-01", "end": "2015-12-31" },
+    { "name": "College",         "start": "2016-01-01", "end": "2019-12-31" },
+    { "name": "Modern",          "start": "2020-01-01", "end": "2026-12-31" }
+  ],
+  "favorite_words": ["fluffy", "moonbeam", "thunder"],
+  "entries": [
+    { "site": "RuneScape",       "category": "Gaming",        "url": "runescape.com",       "abbreviations": ["RS"],   "username": "chris",            "password": "Fluffy!2010RS",      "created_at": "2010-06-01T00:00:00Z" },
+    { "site": "RuneScape",       "category": "Gaming",        "url": "runescape.com",       "abbreviations": ["RS"],   "username": "chris",            "password": "Fluffy!2012RS",      "created_at": "2012-08-15T00:00:00Z" },
+    { "site": "RuneScape",       "category": "Gaming",        "url": "runescape.com",       "abbreviations": ["RS"],   "username": "chris",            "password": "Fluffy!2014RS",      "created_at": "2014-06-01T00:00:00Z" },
+    { "site": "Steam",           "category": "Gaming",        "url": "steampowered.com",    "abbreviations": ["ST"],   "username": "chris",            "password": "Thunder!2013ST",     "created_at": "2013-04-10T00:00:00Z" },
+    { "site": "WorldOfWarcraft", "category": "Gaming",        "url": "worldofwarcraft.com", "abbreviations": ["WOW"],  "username": "chris",            "password": "Thunder!2014WOW",    "created_at": "2014-09-22T00:00:00Z" },
+    { "site": "Twitter",         "category": "Social",        "url": "twitter.com",         "abbreviations": ["TW"],   "username": "chris",            "password": "Fluffy!2013TW",      "created_at": "2013-07-20T00:00:00Z" },
+    { "site": "Facebook",        "category": "Social",        "url": "facebook.com",        "abbreviations": ["FB"],   "username": "chris",            "password": "MoonBeam$2014FB",    "created_at": "2014-05-15T00:00:00Z" },
+    { "site": "YouTube",         "category": "Social",        "url": "youtube.com",         "abbreviations": ["YT"],   "username": "chris",            "password": "Fluffy!2015YT",      "created_at": "2015-03-10T00:00:00Z" },
+    { "site": "Skype",           "category": "Communication", "url": "skype.com",           "abbreviations": ["SK"],   "username": "chris",            "password": "Thunder!2012SK",     "created_at": "2012-11-30T00:00:00Z" },
+    { "site": "Amazon",          "category": "Shopping",      "url": "amazon.com",          "abbreviations": ["AM"],   "username": "chris@example.com","password": "MoonBeam$2016",      "created_at": "2016-03-15T00:00:00Z" },
+    { "site": "Amazon",          "category": "Shopping",      "url": "amazon.com",          "abbreviations": ["AM"],   "username": "chris@example.com","password": "MoonBeam$2018",      "created_at": "2018-03-15T00:00:00Z" },
+    { "site": "Netflix",         "category": "Streaming",     "url": "netflix.com",         "abbreviations": ["NF"],   "username": "chris",            "password": "MoonBeam$2017NF",    "created_at": "2017-05-22T00:00:00Z" },
+    { "site": "Spotify",         "category": "Streaming",     "url": "spotify.com",         "abbreviations": ["SP"],   "username": "chris",            "password": "Thunder!2018SP",     "created_at": "2018-08-12T00:00:00Z" },
+    { "site": "GitHub",          "category": "Tech",          "url": "github.com",          "abbreviations": ["GH"],   "username": "chris.developer",  "password": "GitHub2016!!",       "created_at": "2016-09-01T00:00:00Z" },
+    { "site": "GitHub",          "category": "Tech",          "url": "github.com",          "abbreviations": ["GH"],   "username": "chris.developer",  "password": "GitHub2018!!",       "created_at": "2018-09-01T00:00:00Z" },
+    { "site": "StackOverflow",   "category": "Tech",          "url": "stackoverflow.com",   "abbreviations": ["SO"],   "username": "chris.developer",  "password": "Thunder!@#2017",     "created_at": "2017-11-10T00:00:00Z" },
+    { "site": "Discord",         "category": "Communication", "url": "discord.com",         "abbreviations": ["DC"],   "username": "chris",            "password": "MoonBeam$2017DC",    "created_at": "2017-08-20T00:00:00Z" },
+    { "site": "LinkedIn",        "category": "Social",        "url": "linkedin.com",        "abbreviations": ["LI"],   "username": "chris@example.com","password": "MoonBeam$2018LI",    "created_at": "2018-04-04T00:00:00Z" },
+    { "site": "PayPal",          "category": "Banking",       "url": "paypal.com",          "abbreviations": ["PP"],   "username": "chris@example.com","password": "Banking$2018PP",     "created_at": "2018-12-10T00:00:00Z" },
+    { "site": "Uber",            "category": "Travel",        "url": "uber.com",            "abbreviations": ["UB"],   "username": "chris@example.com","password": "Travel$2019UB",      "created_at": "2019-06-15T00:00:00Z" },
+    { "site": "Reddit",          "category": "Social",        "url": "reddit.com",          "abbreviations": ["Rd"],   "username": "chris",            "password": "MoonBeam$2019Rd",    "created_at": "2019-08-20T00:00:00Z", "is_answer": true, "answer_hints": { "site": "Reddit", "era_name": "College", "hint": "moon" } },
+    { "site": "Steam",           "category": "Gaming",        "url": "steampowered.com",    "abbreviations": ["ST"],   "username": "chris",            "password": "Thunder!@#2020",     "created_at": "2020-01-15T00:00:00Z" },
+    { "site": "Spotify",         "category": "Streaming",     "url": "spotify.com",         "abbreviations": ["SP"],   "username": "chris",            "password": "Thunder!@#2021",     "created_at": "2021-02-20T00:00:00Z" },
+    { "site": "Apple",           "category": "Shopping",      "url": "apple.com",           "abbreviations": ["AP"],   "username": "chris@example.com","password": "Apple!2021AP",       "created_at": "2021-05-30T00:00:00Z" },
+    { "site": "Google",          "category": "Tech",          "url": "google.com",          "abbreviations": ["GG"],   "username": "chris.developer",  "password": "Google!2022GG",      "created_at": "2022-04-12T00:00:00Z" },
+    { "site": "Microsoft",       "category": "Tech",          "url": "microsoft.com",       "abbreviations": ["MS"],   "username": "chris.developer",  "password": "Microsoft!2023MS",   "created_at": "2023-07-08T00:00:00Z" },
+    { "site": "Bank",            "category": "Banking",       "url": "bank.example",        "abbreviations": ["BK"],   "username": "chris.banking",    "password": "Banking$2022BK",     "created_at": "2022-10-25T00:00:00Z" },
+    { "site": "Credit",          "category": "Banking",       "url": "credit.example",      "abbreviations": ["CR"],   "username": "chris.banking",    "password": "Banking$2023CR",     "created_at": "2023-11-15T00:00:00Z" },
+    { "site": "Notion",          "category": "Tech",          "url": "notion.so",           "abbreviations": ["NT"],   "username": "chris.developer",  "password": "Notion!2025NT",      "created_at": "2025-02-10T00:00:00Z" },
+    { "site": "Twitch",          "category": "Streaming",     "url": "twitch.tv",           "abbreviations": ["TW"],   "username": "chris",            "password": "Thunder!2024TW",     "created_at": "2024-07-04T00:00:00Z" }
+  ]
+}
