@@ -14,26 +14,30 @@ impl Generator for WordCombine {
 
     fn generate(&self, ctx: &RecoverContext<'_>) -> Vec<Candidate> {
         let mut out: Vec<Candidate> = Vec::new();
-        let favorites: Vec<&str> = ctx.pool.favorite_base_words.iter().map(|w| w.canonical.as_str()).collect();
+        // Use canonicals for the "no-same-word" filter and as the as-is base.
+        let favorites: Vec<(&str, &str)> = ctx.pool.favorite_base_words.iter()
+            .map(|w| (w.canonical.as_str(), w.original.as_str()))
+            .collect();
+        let fav_canonicals: Vec<&str> = favorites.iter().map(|(c, _)| *c).collect();
         // Top 20 non-favorites (by repo order, which is usage_count desc).
-        let non_fav: Vec<&str> = ctx.pool.all_base_words.iter()
-            .map(|w| w.canonical.as_str())
-            .filter(|w| !favorites.contains(w))
+        let non_fav: Vec<(&str, &str)> = ctx.pool.all_base_words.iter()
+            .map(|w| (w.canonical.as_str(), w.original.as_str()))
+            .filter(|(c, _)| !fav_canonicals.contains(c))
             .take(20)
             .collect();
 
-        // favorites x favorites (skip same-word).
-        for a in &favorites {
-            for b in &favorites {
-                if a == b { continue; }
-                push_pair(&mut out, a, b);
+        // favorites x favorites (skip same-canonical).
+        for (a_canon, a_orig) in &favorites {
+            for (b_canon, b_orig) in &favorites {
+                if a_canon == b_canon { continue; }
+                push_pair(&mut out, a_canon, b_canon, a_orig, b_orig);
                 if out.len() >= MAX_OUTPUTS { return out; }
             }
         }
         // favorites x top-20 non-favorites.
-        for a in &favorites {
-            for b in &non_fav {
-                push_pair(&mut out, a, b);
+        for (a_canon, a_orig) in &favorites {
+            for (b_canon, b_orig) in &non_fav {
+                push_pair(&mut out, a_canon, b_canon, a_orig, b_orig);
                 if out.len() >= MAX_OUTPUTS { return out; }
             }
         }
@@ -41,20 +45,29 @@ impl Generator for WordCombine {
     }
 }
 
-fn push_pair(out: &mut Vec<Candidate>, a: &str, b: &str) {
+fn push_pair(out: &mut Vec<Candidate>, a_canon: &str, b_canon: &str, a_orig: &str, b_orig: &str) {
     for sep in SEPARATORS {
-        // as-is.
+        // as-is (canonical, lowercase).
         out.push(Candidate {
-            password: Zeroizing::new(format!("{a}{sep}{b}")),
+            password: Zeroizing::new(format!("{a_canon}{sep}{b_canon}")),
             score: 0.0,
             provenance: vec![RuleId::WordCombine],
             seed_history_id: None,
         });
         // TitleCase each word.
-        let title_a = title_case(a);
-        let title_b = title_case(b);
+        let title_a = title_case(a_canon);
+        let title_b = title_case(b_canon);
         out.push(Candidate {
             password: Zeroizing::new(format!("{title_a}{sep}{title_b}")),
+            score: 0.0,
+            provenance: vec![RuleId::WordCombine],
+            seed_history_id: None,
+        });
+        // Original casing — privileged variant. When canonical == original
+        // (legacy rows or all-lowercase favorites), this duplicates the as-is
+        // emission and gets collapsed by dedup downstream.
+        out.push(Candidate {
+            password: Zeroizing::new(format!("{a_orig}{sep}{b_orig}")),
             score: 0.0,
             provenance: vec![RuleId::WordCombine],
             seed_history_id: None,
@@ -102,15 +115,35 @@ mod tests {
     fn combines_two_favorites_with_all_seps_and_cases() {
         let pool = Pool {
             seeds: vec![],
-            favorite_base_words: vec![entry("blue"), entry("fish")],
-            all_base_words: vec![entry("blue"), entry("fish")],
+            favorite_base_words: vec![
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("blue".into()),
+                    original: Zeroizing::new("blue".into()),
+                },
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("fish".into()),
+                    original: Zeroizing::new("fish".into()),
+                },
+            ],
+            all_base_words: vec![
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("blue".into()),
+                    original: Zeroizing::new("blue".into()),
+                },
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("fish".into()),
+                    original: Zeroizing::new("fish".into()),
+                },
+            ],
             site_abbreviations: vec![], era_window: None,
         };
         let stats = HistoryStats::default();
         let cfg = RecoverConfig::default();
         let out = WordCombine.generate(&ctx_with_pool(&pool, &stats, &cfg));
-        // 2 ordered pairs (blue,fish) and (fish,blue), each producing 6 outputs (3 seps x 2 case patterns) = 12.
-        assert_eq!(out.len(), 12);
+        // 2 ordered pairs × 3 separators × 3 case patterns (as-is, TitleCase, original) = 18.
+        // Dedup happens later in the pipeline; the generator emits all 18 even if
+        // some collide (canonical == original here).
+        assert_eq!(out.len(), 18);
         let strs: Vec<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();
         assert!(strs.contains(&"bluefish".to_string()));
         assert!(strs.contains(&"BlueFish".to_string()));
@@ -121,7 +154,12 @@ mod tests {
     #[test]
     fn caps_at_max_outputs() {
         // Generate enough favorites that the cartesian product would exceed the cap.
-        let favs: Vec<DecryptedBaseWordEntry> = (0..30).map(|i| entry(&format!("w{i}"))).collect();
+        let favs: Vec<crate::recovery::DecryptedBaseWordEntry> = (0..30)
+            .map(|i| crate::recovery::DecryptedBaseWordEntry {
+                canonical: Zeroizing::new(format!("w{i}")),
+                original: Zeroizing::new(format!("w{i}")),
+            })
+            .collect();
         let pool = Pool {
             seeds: vec![],
             favorite_base_words: favs.clone(),
@@ -131,8 +169,44 @@ mod tests {
         let stats = HistoryStats::default();
         let cfg = RecoverConfig::default();
         let out = WordCombine.generate(&ctx_with_pool(&pool, &stats, &cfg));
-        // push_pair adds 6 entries per call; the cap fires AFTER push_pair returns.
-        // Worst-case overshoot is 5 (we hit MAX_OUTPUTS-1 before the last pair, then add 6).
-        assert!(out.len() <= MAX_OUTPUTS + 6);
+        // push_pair adds 9 entries per call (3 seps × 3 case patterns); the cap fires
+        // AFTER push_pair returns. Worst-case overshoot is 8.
+        assert!(out.len() <= MAX_OUTPUTS + 9);
+    }
+
+    #[test]
+    fn emits_original_casing_pair() {
+        let pool = Pool {
+            seeds: vec![],
+            favorite_base_words: vec![
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("moon".into()),
+                    original: Zeroizing::new("Moon".into()),
+                },
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("beam".into()),
+                    original: Zeroizing::new("Beam".into()),
+                },
+            ],
+            all_base_words: vec![
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("moon".into()),
+                    original: Zeroizing::new("Moon".into()),
+                },
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("beam".into()),
+                    original: Zeroizing::new("Beam".into()),
+                },
+            ],
+            site_abbreviations: vec![], era_window: None,
+        };
+        let stats = HistoryStats::default();
+        let cfg = RecoverConfig::default();
+        let out = WordCombine.generate(&ctx_with_pool(&pool, &stats, &cfg));
+        let strs: Vec<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();
+        // Original-casing pair "Moon" + "Beam" with empty separator → "MoonBeam".
+        assert!(strs.contains(&"MoonBeam".to_string()), "original-cased pair emitted");
+        // Original with dash → "Moon-Beam".
+        assert!(strs.contains(&"Moon-Beam".to_string()), "original-cased dash pair emitted");
     }
 }
