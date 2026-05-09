@@ -2,18 +2,24 @@ mod common;
 
 use passhound_core::{recover, RecoverConfig};
 
-/// Phase 3 / Phase 3.5 sanity test: with full hints, the recover() pipeline runs
-/// to completion and the hint substring appears in at least one candidate. This
-/// validates pipeline execution and hint-relevance retention through multi-pass
-/// + hint-partitioned cap truncation.
+/// Phase 3 / Phase 3.5 / Phase 3.6 sanity test: with full hints, the recover()
+/// pipeline runs to completion and the hint substring appears in at least one
+/// candidate.
 ///
-/// Originally Phase 3 spec required exact-match recovery in top-50. Phase 3.5
-/// adds multi-pass mode, hint-biased promise scoring, and rule patches ($ in
-/// SpecialSuffix, era-aware NumberIncrement, name-matched site abbreviations,
-/// transformer-order reshuffle) which DO improve compound-pattern reachability
-/// but the cap-truncation still favors long compound chains over the canonical
-/// short-provenance answer pattern. Phase 3.6 is responsible for stats-aware
-/// promise scoring or P4 (favorite casing preservation) to close that gap.
+/// Phase 3 originally specified exact-match in top-50. Phase 3.5 weakened to
+/// hint-substring presence after compound-pattern synthesis hit an architectural
+/// limit. Phase 3.6 added stats-aware cap truncation (hybrid hint-partition +
+/// ranking::score-based sort) which improves perf and ranking quality, but
+/// "MoonBeam$2019Rd" still does not surface in top-100 because the WordCombine
+/// `MoonBeam` candidate gets transformed past recognition early in the multi-pass
+/// pipeline (the favorites are stored lowercased after tokenize, so WordCombine
+/// emits both lowercase "moonbeam" and TitleCase "MoonBeam" but the latter
+/// competes with thousands of other generated combinations and gets pruned).
+///
+/// Phase 3.7 candidate fix: P4 — preserve favorite-word original casing through
+/// `tokenize` (schema migration #4), so "MoonBeam" enters base_words as a single
+/// canonical entry and WordCombine doesn't have to invent the casing. Until then,
+/// this assertion stays weakened.
 #[test]
 fn finds_known_answer_with_full_hints() {
     let (_t, v, answers) = common::build_vault_from_fixture();
