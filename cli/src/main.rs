@@ -28,6 +28,8 @@ enum Command {
     Import(commands::import::ImportArgs),
     /// Generate ranked recovery candidates from your own history.
     Recover(commands::recover::RecoverArgs),
+    /// Tokenize password history and populate base_words.
+    Analyze(commands::analyze::AnalyzeArgs),
 }
 
 fn default_vault_path() -> PathBuf {
@@ -46,5 +48,6 @@ fn main() -> anyhow::Result<()> {
         Command::Get(args) => commands::get::run(&vault_path, args),
         Command::Import(args) => commands::import::run(&vault_path, args),
         Command::Recover(args) => commands::recover::run(&vault_path, args),
+        Command::Analyze(args) => commands::analyze::run(&vault_path, args),
     }
 }

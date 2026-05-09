@@ -10,4 +10,6 @@ pub mod vault;
 
 pub use error::{Error, Result};
 pub use vault::Vault;
-pub use recovery::{recover, AnalyzeReport, Candidate, RecoverConfig, RuleId};
+pub use recovery::{
+    extract_base_words_from_history, recover, AnalyzeReport, Candidate, RecoverConfig, RuleId,
+};
