@@ -13,6 +13,7 @@ pub struct BaseWord {
     pub first_seen_at: Option<DateTime<Utc>>,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub usage_count: i64,
+    pub casing_mask: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +22,7 @@ pub struct DecryptedBaseWord {
     pub word: Zeroizing<String>,
     pub is_favorite: bool,
     pub usage_count: i64,
+    pub casing_mask: u64,
 }
 
 /// Aggregated counts for a single token, fed into `upsert_aggregated`.
@@ -29,12 +31,13 @@ pub struct AggregatedToken<'a> {
     pub usage_count: i64,
     pub first_seen_at: DateTime<Utc>,
     pub last_seen_at: DateTime<Utc>,
+    pub casing_mask: u64,
 }
 
 /// List metadata for every base word. Does NOT decrypt; returns counts only.
 pub fn list(vault: &Vault) -> Result<Vec<BaseWord>> {
     let mut stmt = vault.conn().prepare(
-        "SELECT id, is_favorite, manual_override, first_seen_at, last_seen_at, usage_count
+        "SELECT id, is_favorite, manual_override, first_seen_at, last_seen_at, usage_count, casing_mask
          FROM base_words ORDER BY usage_count DESC, id ASC",
     )?;
     let rows = stmt
@@ -48,6 +51,7 @@ pub fn list(vault: &Vault) -> Result<Vec<BaseWord>> {
                 first_seen_at: first.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
                 last_seen_at: last.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.with_timezone(&Utc))),
                 usage_count: r.get(5)?,
+                casing_mask: r.get::<_, i64>(6)? as u64,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -80,8 +84,6 @@ pub fn demote(vault: &Vault, id: i64) -> Result<()> {
 /// last_seen_at updated. The caller (analyze) is responsible for transaction boundaries.
 pub fn upsert_aggregated(vault: &Vault, tok: AggregatedToken<'_>) -> Result<()> {
     let key = vault.require_key()?;
-    // We can't UNIQUE-index encrypted blobs (different nonces produce different ciphertexts
-    // even for the same plaintext). Instead: fetch_decrypted -> find -> UPDATE; else INSERT.
     let existing = fetch_decrypted(vault)?;
     if let Some(found) = existing.iter().find(|w| w.word.as_str() == tok.word) {
         vault.conn().execute(
@@ -92,14 +94,15 @@ pub fn upsert_aggregated(vault: &Vault, tok: AggregatedToken<'_>) -> Result<()> 
     }
     let (ct, nonce) = aead::encrypt(key.as_bytes(), tok.word.as_bytes())?;
     vault.conn().execute(
-        "INSERT INTO base_words (word_encrypted, word_nonce, is_favorite, first_seen_at, last_seen_at, usage_count)
-         VALUES (?1, ?2, 0, ?3, ?4, ?5)",
+        "INSERT INTO base_words (word_encrypted, word_nonce, is_favorite, first_seen_at, last_seen_at, usage_count, casing_mask)
+         VALUES (?1, ?2, 0, ?3, ?4, ?5, ?6)",
         params![
             ct,
             nonce.as_slice(),
             tok.first_seen_at.to_rfc3339(),
             tok.last_seen_at.to_rfc3339(),
             tok.usage_count,
+            tok.casing_mask as i64,
         ],
     )?;
     Ok(())
@@ -133,7 +136,7 @@ pub fn refresh_auto_favorites(vault: &Vault, top_n: usize) -> Result<()> {
 pub fn fetch_decrypted(vault: &Vault) -> Result<Vec<DecryptedBaseWord>> {
     let key = vault.require_key()?;
     let mut stmt = vault.conn().prepare(
-        "SELECT id, word_encrypted, word_nonce, is_favorite, usage_count FROM base_words ORDER BY usage_count DESC, id ASC",
+        "SELECT id, word_encrypted, word_nonce, is_favorite, usage_count, casing_mask FROM base_words ORDER BY usage_count DESC, id ASC",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok((
@@ -142,11 +145,12 @@ pub fn fetch_decrypted(vault: &Vault) -> Result<Vec<DecryptedBaseWord>> {
             r.get::<_, Vec<u8>>(2)?,
             r.get::<_, i64>(3)? != 0,
             r.get::<_, i64>(4)?,
+            r.get::<_, i64>(5)? as u64,
         ))
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
 
     let mut out = Vec::with_capacity(rows.len());
-    for (id, ct, nonce_vec, is_favorite, usage_count) in rows {
+    for (id, ct, nonce_vec, is_favorite, usage_count, casing_mask) in rows {
         if nonce_vec.len() != NONCE_LEN {
             return Err(Error::InvalidInput("malformed base_word nonce".into()));
         }
@@ -159,9 +163,54 @@ pub fn fetch_decrypted(vault: &Vault) -> Result<Vec<DecryptedBaseWord>> {
             word: Zeroizing::new(s.to_owned()),
             is_favorite,
             usage_count,
+            casing_mask,
         });
     }
     Ok(out)
+}
+
+/// Reconstruct the original-cased form of a lowercase canonical word using a
+/// bitmask. Bit `i` of `mask` corresponds to position `i` (0-indexed) of
+/// `canonical`: bit set means that character is uppercase in the original.
+///
+/// Examples:
+/// - canonical="moonbeam", mask=0b00010001 (=17) → "MoonBeam"
+///   (bit 0 set → upper M, bit 4 set → upper B)
+/// - canonical="iphone",   mask=0b00000010 (=2)  → "iPhone"
+///   (bit 1 set → upper P)
+/// - canonical="hello",    mask=0                → "hello"
+///
+/// Words shorter than 64 chars use the low bits; bits beyond the word length
+/// are ignored. Tokenize already caps tokens at 24 chars, well under 64.
+pub fn apply_casing_mask(canonical: &str, mask: u64) -> String {
+    let mut out = String::with_capacity(canonical.len());
+    for (i, ch) in canonical.chars().enumerate() {
+        if i < 64 && (mask >> i) & 1 == 1 {
+            out.extend(ch.to_uppercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Compute the casing bitmask of `original` against its lowercase canonical.
+/// Bit `i` is set if `original`'s character at position `i` is uppercase.
+/// Characters at positions >= 64 do not contribute to the mask.
+///
+/// Examples:
+/// - "MoonBeam" → 0b00010001 (= 17)
+/// - "iPhone"   → 0b00000010 (= 2)
+/// - "hello"    → 0
+pub fn compute_casing_mask(original: &str) -> u64 {
+    let mut mask: u64 = 0;
+    for (i, ch) in original.chars().enumerate() {
+        if i >= 64 { break; }
+        if ch.is_uppercase() {
+            mask |= 1u64 << i;
+        }
+    }
+    mask
 }
 
 #[cfg(test)]
@@ -180,8 +229,8 @@ mod tests {
     fn upsert_inserts_then_updates() {
         let (_t, v) = vault();
         let now = Utc::now();
-        upsert_aggregated(&v, AggregatedToken { word: "fluffy", usage_count: 3, first_seen_at: now, last_seen_at: now }).unwrap();
-        upsert_aggregated(&v, AggregatedToken { word: "fluffy", usage_count: 5, first_seen_at: now, last_seen_at: now }).unwrap();
+        upsert_aggregated(&v, AggregatedToken { word: "fluffy", usage_count: 3, first_seen_at: now, last_seen_at: now, casing_mask: 0 }).unwrap();
+        upsert_aggregated(&v, AggregatedToken { word: "fluffy", usage_count: 5, first_seen_at: now, last_seen_at: now, casing_mask: 0 }).unwrap();
         let words = fetch_decrypted(&v).unwrap();
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].word.as_str(), "fluffy");
@@ -192,7 +241,7 @@ mod tests {
     fn promote_sets_favorite_and_manual_override() {
         let (_t, v) = vault();
         let now = Utc::now();
-        upsert_aggregated(&v, AggregatedToken { word: "moonbeam", usage_count: 1, first_seen_at: now, last_seen_at: now }).unwrap();
+        upsert_aggregated(&v, AggregatedToken { word: "moonbeam", usage_count: 1, first_seen_at: now, last_seen_at: now, casing_mask: 0 }).unwrap();
         let id = list(&v).unwrap()[0].id;
         promote(&v, id).unwrap();
         let row = list(&v).unwrap().into_iter().find(|w| w.id == id).unwrap();
@@ -205,7 +254,7 @@ mod tests {
         let (_t, v) = vault();
         let now = Utc::now();
         for (w, c) in [("a", 10), ("b", 9), ("c", 8), ("d", 1)] {
-            upsert_aggregated(&v, AggregatedToken { word: w, usage_count: c, first_seen_at: now, last_seen_at: now }).unwrap();
+            upsert_aggregated(&v, AggregatedToken { word: w, usage_count: c, first_seen_at: now, last_seen_at: now, casing_mask: 0 }).unwrap();
         }
         // Manually demote 'a' (which would otherwise be favorited by top-2).
         let a_id = fetch_decrypted(&v).unwrap().iter().find(|x| x.word.as_str() == "a").unwrap().id;
@@ -233,5 +282,49 @@ mod tests {
         let (_t, v) = vault();
         let err = promote(&v, 9999).unwrap_err();
         assert!(matches!(err, Error::NotFound));
+    }
+
+    #[test]
+    fn apply_casing_mask_basic() {
+        assert_eq!(apply_casing_mask("moonbeam", 0b00010001), "MoonBeam");
+        assert_eq!(apply_casing_mask("iphone", 0b00000010), "iPhone");
+        assert_eq!(apply_casing_mask("hello", 0), "hello");
+        assert_eq!(apply_casing_mask("abc", 0b00000111), "ABC");
+    }
+
+    #[test]
+    fn compute_casing_mask_basic() {
+        assert_eq!(compute_casing_mask("MoonBeam"), 0b00010001);
+        assert_eq!(compute_casing_mask("iPhone"), 0b00000010);
+        assert_eq!(compute_casing_mask("hello"), 0);
+        assert_eq!(compute_casing_mask("ABC"), 0b00000111);
+    }
+
+    #[test]
+    fn casing_mask_round_trip() {
+        for word in &["MoonBeam", "iPhone", "hello", "ABC", "fLuFfY"] {
+            let canonical: String = word.chars().flat_map(|c| c.to_lowercase()).collect();
+            let mask = compute_casing_mask(word);
+            let roundtrip = apply_casing_mask(&canonical, mask);
+            assert_eq!(&roundtrip, *word, "round trip failed for '{word}'");
+        }
+    }
+
+    #[test]
+    fn upsert_aggregated_persists_casing_mask() {
+        let (_t, v) = vault();
+        let now = Utc::now();
+        upsert_aggregated(&v, AggregatedToken {
+            word: "moonbeam",
+            usage_count: 1,
+            first_seen_at: now,
+            last_seen_at: now,
+            casing_mask: 0b00010001,
+        }).unwrap();
+        let words = fetch_decrypted(&v).unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].word.as_str(), "moonbeam");
+        assert_eq!(words[0].casing_mask, 0b00010001);
+        assert_eq!(apply_casing_mask(words[0].word.as_str(), words[0].casing_mask), "MoonBeam");
     }
 }
