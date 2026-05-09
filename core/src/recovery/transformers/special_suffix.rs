@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 pub struct SpecialSuffix;
 
 const MAX_OUT: usize = 12;
-const FIXED_SUFFIXES: &[&str] = &["!", "!!", "?", ".", "@", "#", "!@#", "1!"];
+const FIXED_SUFFIXES: &[&str] = &["!", "!!", "?", ".", "@", "#", "$", "!@#", "1!"];
 
 impl Transformer for SpecialSuffix {
     fn name(&self) -> &'static str { "SpecialSuffix" }
@@ -103,5 +103,14 @@ mod tests {
         // Should NOT contain "abcd!!!" (which would be from "abcd!" + stats-append "!!"); should still contain "abcd!!".
         assert!(strs.contains(&"abcd!!".to_string()));
         // None of the candidates should be the "stats-symbol" append form like "abcd!!!" (which was the buggy interpretation).
+    }
+
+    #[test]
+    fn appends_dollar_suffix() {
+        let (p, s, c) = (Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None }, HistoryStats::default(), RecoverConfig::default());
+        let out = SpecialSuffix.transform(&cand("abcd"), &rc(&p, &s, &c));
+        let strs: Vec<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();
+        assert!(strs.contains(&"abcd$".to_string()),
+            "expected 'abcd$' in outputs; got {strs:?}");
     }
 }
