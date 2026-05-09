@@ -3,6 +3,7 @@
 use crate::recovery::{Candidate, RecoverContext};
 
 pub mod base_word_pool;
+pub mod word_combine;
 
 pub trait Generator: Sync {
     fn name(&self) -> &'static str;
@@ -11,4 +12,5 @@ pub trait Generator: Sync {
 
 pub static GENERATORS: &[&'static dyn Generator] = &[
     &base_word_pool::BaseWordPool,
+    &word_combine::WordCombine,
 ];
