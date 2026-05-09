@@ -22,12 +22,15 @@ pub struct AnalyzeReport {
 /// Vault must be unlocked.
 pub fn extract_base_words_from_history(vault: &Vault, top_favorites: usize) -> Result<AnalyzeReport> {
     // 1. SELECT every password_history row (id + decrypted plaintext + created_at).
-    let history = decrypt_all_history(vault)?;
+    let mut history = decrypt_all_history(vault)?;
     if history.is_empty() {
         return Ok(AnalyzeReport::default());
     }
+    // Sort by created_at ascending so the FIRST occurrence of a token captures
+    // its casing (first-seen wins, per Phase 3.7 spec).
+    history.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-    // 2. Tokenize each plaintext, aggregate {word -> count, first_seen, last_seen}.
+    // 2. Tokenize each plaintext, aggregate {word -> count, first_seen, last_seen, casing_mask}.
     let mut agg: HashMap<String, Aggregate> = HashMap::new();
     for (created_at, plaintext) in &history {
         for token in tokenize(plaintext.as_str()) {
@@ -101,14 +104,15 @@ fn insert_encrypted(
     let key = vault.require_key()?;
     let (ct, nonce) = aead::encrypt(key.as_bytes(), word.as_bytes())?;
     tx.execute(
-        "INSERT INTO base_words (word_encrypted, word_nonce, is_favorite, first_seen_at, last_seen_at, usage_count, manual_override)
-         VALUES (?1, ?2, 0, ?3, ?4, ?5, 0)",
+        "INSERT INTO base_words (word_encrypted, word_nonce, is_favorite, first_seen_at, last_seen_at, usage_count, manual_override, casing_mask)
+         VALUES (?1, ?2, 0, ?3, ?4, ?5, 0, ?6)",
         params![
             ct,
             nonce.as_slice(),
             ag.first_seen.to_rfc3339(),
             ag.last_seen.to_rfc3339(),
             ag.count as i64,
+            ag.casing_mask as i64,
         ],
     )?;
     Ok(())
@@ -303,5 +307,43 @@ mod tests {
         assert!(!apple_after.is_favorite, "apple manually demoted; analyze must not auto-favorite it");
         assert!(banana_after.is_favorite, "banana manually promoted; analyze must keep favorite");
         let _ = words_before; // silence unused
+    }
+
+    #[test]
+    fn analyze_captures_first_seen_casing() {
+        use chrono::TimeZone;
+        let (_t, v) = vault();
+        let s = sites::create(&v, NewSite { name: "S".into(), ..Default::default() }).unwrap();
+        let a = accounts::create(&v, NewAccount { site_id: s.id, ..Default::default() }).unwrap();
+        // Insert two entries: the EARLIER one has "MoonBeam" casing, the LATER one
+        // has lowercase "moonbeam" casing. First-seen wins => stored mask = 0b0001 (bit 0)
+        // for both "moon" and "beam" tokens (each tokenized segment has its first char upper).
+        crate::repo::passwords::insert(&v, crate::repo::passwords::NewPassword {
+            account_id: a.id,
+            plaintext: "MoonBeam$2014",
+            source: "manual".into(),
+            confidence: crate::repo::passwords::Confidence::Certain,
+            notes: None,
+            created_at: Some(Utc.with_ymd_and_hms(2014, 1, 1, 0, 0, 0).unwrap()),
+        }).unwrap();
+        crate::repo::passwords::insert(&v, crate::repo::passwords::NewPassword {
+            account_id: a.id,
+            plaintext: "moonbeam$2018",
+            source: "manual".into(),
+            confidence: crate::repo::passwords::Confidence::Certain,
+            notes: None,
+            created_at: Some(Utc.with_ymd_and_hms(2018, 1, 1, 0, 0, 0).unwrap()),
+        }).unwrap();
+
+        extract_base_words_from_history(&v, 2).unwrap();
+        let words = base_words::fetch_decrypted(&v).unwrap();
+        let moon = words.iter().find(|w| w.word.as_str() == "moon").unwrap();
+        let beam = words.iter().find(|w| w.word.as_str() == "beam").unwrap();
+        assert_eq!(moon.casing_mask, 0b0001, "first-seen 'Moon' has bit 0 set");
+        assert_eq!(beam.casing_mask, 0b0001, "first-seen 'Beam' has bit 0 set");
+
+        // Reconstruct via apply_casing_mask:
+        assert_eq!(crate::repo::base_words::apply_casing_mask("moon", moon.casing_mask), "Moon");
+        assert_eq!(crate::repo::base_words::apply_casing_mask("beam", beam.casing_mask), "Beam");
     }
 }
