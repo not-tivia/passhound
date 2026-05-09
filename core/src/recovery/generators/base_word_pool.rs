@@ -15,32 +15,40 @@ impl Generator for BaseWordPool {
         let mut out: Vec<Candidate> = Vec::new();
 
         // Favorites first; weighted x3 by emitting them three times so they get
-        // more transformer fan-out chances. (Dedup pass after each transformer
-        // collapses identical strings, but the multiple emits give the seed extra
-        // provenance weight when collisions merge.)
+        // more transformer fan-out chances. Each favorite contributes BOTH the
+        // lowercase canonical AND the original casing (e.g. "moonbeam" + "MoonBeam"),
+        // so the user's actual casing enters the seed set as a privileged variant.
+        // Dedup later collapses identical strings (when canonical == original, no
+        // duplication beyond the existing x3 weighting).
         for w in &ctx.pool.favorite_base_words {
-            for _ in 0..3 {
-                if out.len() >= MAX_OUTPUTS { return out; }
+            for variant in [w.canonical.as_str(), w.original.as_str()] {
+                for _ in 0..3 {
+                    if out.len() >= MAX_OUTPUTS { return out; }
+                    out.push(Candidate {
+                        password: Zeroizing::new(variant.to_owned()),
+                        score: 0.0,
+                        provenance: vec![RuleId::BaseWordPool],
+                        seed_history_id: None,
+                    });
+                }
+            }
+        }
+
+        // All base words by usage_count desc (already sorted by repo). Same
+        // canonical+original treatment, but no x3 weighting (only favorites
+        // get that privilege).
+        for w in &ctx.pool.all_base_words {
+            for variant in [w.canonical.as_str(), w.original.as_str()] {
+                if out.len() >= MAX_OUTPUTS { break; }
+                // Skip exact duplicates of variants already pushed.
+                if out.iter().any(|c| c.password.as_str() == variant) { continue; }
                 out.push(Candidate {
-                    password: Zeroizing::new(w.canonical.as_str().to_owned()),
+                    password: Zeroizing::new(variant.to_owned()),
                     score: 0.0,
                     provenance: vec![RuleId::BaseWordPool],
                     seed_history_id: None,
                 });
             }
-        }
-
-        // All base words by usage_count desc (already sorted by repo).
-        for w in &ctx.pool.all_base_words {
-            if out.len() >= MAX_OUTPUTS { break; }
-            // Skip exact duplicates of favorites already pushed.
-            if out.iter().any(|c| c.password.as_str() == w.canonical.as_str()) { continue; }
-            out.push(Candidate {
-                password: Zeroizing::new(w.canonical.as_str().to_owned()),
-                score: 0.0,
-                provenance: vec![RuleId::BaseWordPool],
-                seed_history_id: None,
-            });
         }
         out
     }
@@ -74,8 +82,30 @@ mod tests {
     fn emits_favorites_first() {
         let pool = Pool {
             seeds: vec![],
-            favorite_base_words: vec![entry("apple"), entry("banana")],
-            all_base_words: vec![entry("apple"), entry("banana"), entry("cherry")],
+            favorite_base_words: vec![
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("apple".into()),
+                    original: Zeroizing::new("apple".into()),
+                },
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("banana".into()),
+                    original: Zeroizing::new("banana".into()),
+                },
+            ],
+            all_base_words: vec![
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("apple".into()),
+                    original: Zeroizing::new("apple".into()),
+                },
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("banana".into()),
+                    original: Zeroizing::new("banana".into()),
+                },
+                crate::recovery::DecryptedBaseWordEntry {
+                    canonical: Zeroizing::new("cherry".into()),
+                    original: Zeroizing::new("cherry".into()),
+                },
+            ],
             site_abbreviations: vec![],
             era_window: None,
         };
@@ -83,11 +113,14 @@ mod tests {
         let cfg = RecoverConfig::default();
         let ctx = RecoverContext { vault: dummy_vault(), config: &cfg, pool: &pool, stats: &stats };
         let out = BaseWordPool.generate(&ctx);
-        // 3 emits of each of 2 favorites = 6, plus cherry = 7.
-        assert_eq!(out.len(), 7);
+        // 2 favorites × 2 variants × 3 emits = 12 (canonical and original collide
+        // when equal, but the favorites loop doesn't dedup; that happens later
+        // in the pipeline). Plus cherry from all_base_words: canonical pushes
+        // once, original (==canonical) is dropped by the all_base_words dedup. = 13.
+        assert_eq!(out.len(), 13);
         assert_eq!(out[0].password.as_str(), "apple");
-        assert_eq!(out[3].password.as_str(), "banana");
-        assert_eq!(out[6].password.as_str(), "cherry");
+        assert_eq!(out[6].password.as_str(), "banana");
+        assert_eq!(out[12].password.as_str(), "cherry");
     }
 
     #[test]
@@ -121,5 +154,29 @@ mod tests {
         let ctx = RecoverContext { vault: dummy_vault(), config: &cfg, pool: &pool, stats: &stats };
         let out = BaseWordPool.generate(&ctx);
         assert!(out.iter().all(|c| c.provenance == vec![RuleId::BaseWordPool]));
+    }
+
+    #[test]
+    fn emits_original_casing_when_different_from_canonical() {
+        let pool = Pool {
+            seeds: vec![],
+            favorite_base_words: vec![crate::recovery::DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("moonbeam".into()),
+                original: Zeroizing::new("MoonBeam".into()),
+            }],
+            all_base_words: vec![crate::recovery::DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("moonbeam".into()),
+                original: Zeroizing::new("MoonBeam".into()),
+            }],
+            site_abbreviations: vec![],
+            era_window: None,
+        };
+        let stats = HistoryStats::default();
+        let cfg = RecoverConfig::default();
+        let ctx = RecoverContext { vault: dummy_vault(), config: &cfg, pool: &pool, stats: &stats };
+        let out = BaseWordPool.generate(&ctx);
+        let strs: Vec<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();
+        assert!(strs.contains(&"moonbeam".to_string()), "canonical present");
+        assert!(strs.contains(&"MoonBeam".to_string()), "original present");
     }
 }
