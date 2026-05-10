@@ -67,11 +67,9 @@ pub fn decompose(password: &str, ctx: &RecoverContext<'_>) -> Option<Vec<Segment
         }
         // 3. Digit run.
         if raw[i].is_ascii_digit() {
-            let start = i;
             while i < raw.len() && raw[i].is_ascii_digit() {
                 i += 1;
             }
-            let _ = start;
             out.push(Segment::DigitRun);
             continue;
         }
