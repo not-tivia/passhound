@@ -26,8 +26,7 @@ fn default_vault_path() -> Result<PathBuf, GuiError> {
 // ============================================================================
 
 #[tauri::command]
-pub fn vault_exists(state: State<'_, VaultState>) -> Result<bool, GuiError> {
-    let _ = state;
+pub fn vault_exists(_state: State<'_, VaultState>) -> Result<bool, GuiError> {
     vault_exists_inner(&default_vault_path()?)
 }
 
@@ -120,11 +119,15 @@ pub fn list_accounts_inner(
     state: &VaultState,
     filter: Option<&str>,
 ) -> Result<Vec<AccountSummary>, GuiError> {
+    // TODO(perf): the guard is held across the SQL / decrypt call below —
+    // acceptable for the MVP single-user case but a `vault_lock` IPC would
+    // stall waiting on a slow query. Revisit if list latency becomes an issue.
+    // `Some(vault)` always implies unlocked here because `vault_create_inner`
+    // and `vault_unlock_inner` are the only writers and they store post-unlock
+    // vaults; downstream repo calls invoke `require_key()` which will surface
+    // `core::Error::Locked → GuiError::Locked` defensively if invariant breaks.
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
-    if !v.is_unlocked() {
-        return Err(GuiError::Locked);
-    }
     // Joined query: accounts × sites + max(password_history.created_at) for the
     // most-recent password (current or retired). Ordered by last_changed desc
     // with NULLs (accounts with no password history) last.
@@ -202,11 +205,15 @@ pub fn get_account(
 }
 
 pub fn get_account_inner(state: &VaultState, id: i64) -> Result<AccountDetail, GuiError> {
+    // TODO(perf): the guard is held across the SQL / decrypt call below —
+    // acceptable for the MVP single-user case but a `vault_lock` IPC would
+    // stall waiting on a slow query. Revisit if list latency becomes an issue.
+    // `Some(vault)` always implies unlocked here because `vault_create_inner`
+    // and `vault_unlock_inner` are the only writers and they store post-unlock
+    // vaults; downstream repo calls invoke `require_key()` which will surface
+    // `core::Error::Locked → GuiError::Locked` defensively if invariant breaks.
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
-    if !v.is_unlocked() {
-        return Err(GuiError::Locked);
-    }
     let acct = repo::accounts::get(v, id)?;
     let site = repo::sites::get(v, acct.site_id)?;
     let history_records = repo::passwords::list_history(v, id)?;
@@ -243,11 +250,15 @@ pub fn reveal_password_inner(
     state: &VaultState,
     history_id: i64,
 ) -> Result<String, GuiError> {
+    // TODO(perf): the guard is held across the SQL / decrypt call below —
+    // acceptable for the MVP single-user case but a `vault_lock` IPC would
+    // stall waiting on a slow query. Revisit if list latency becomes an issue.
+    // `Some(vault)` always implies unlocked here because `vault_create_inner`
+    // and `vault_unlock_inner` are the only writers and they store post-unlock
+    // vaults; downstream repo calls invoke `require_key()` which will surface
+    // `core::Error::Locked → GuiError::Locked` defensively if invariant breaks.
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
-    if !v.is_unlocked() {
-        return Err(GuiError::Locked);
-    }
     let plaintext = repo::passwords::decrypt_record(v, history_id)?;
     // The Zeroizing<String> goes out of scope after this clone, so the
     // intermediate buffer zeros. The String returned to Tauri is on the JS
@@ -262,9 +273,11 @@ pub fn copy_to_clipboard(
     text: String,
 ) -> Result<(), GuiError> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
-    let zeroing = Zeroizing::new(text);
+    // No Zeroizing wrap here: the OS clipboard owns the plaintext after this
+    // call returns. Zeroing the local String doesn't affect the clipboard
+    // buffer. Clipboard auto-clear is Settings work (Phase 4.6).
     app.clipboard()
-        .write_text(zeroing.as_str().to_string())
+        .write_text(text)
         .map_err(|e| GuiError::Internal(format!("clipboard: {e}")))
 }
 
@@ -274,18 +287,6 @@ pub fn copy_to_clipboard(
 
 fn poisoned<T>(_: std::sync::PoisonError<T>) -> GuiError {
     GuiError::Internal("vault state mutex poisoned".into())
-}
-
-impl From<std::io::Error> for GuiError {
-    fn from(e: std::io::Error) -> Self {
-        GuiError::Internal(format!("io: {e}"))
-    }
-}
-
-impl From<rusqlite::Error> for GuiError {
-    fn from(e: rusqlite::Error) -> Self {
-        GuiError::Internal(format!("sqlite: {e}"))
-    }
 }
 
 // ============================================================================
@@ -364,6 +365,51 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         let unfiltered = list_accounts_inner(&state, Some("zzz_no_match_zzz")).unwrap();
         assert_eq!(unfiltered.len(), 0);
+    }
+
+    #[test]
+    fn get_account_returns_detail_with_history() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let account_id;
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "Reddit".into(),
+                url: Some("reddit.com".into()),
+                category: Some("Social".into()),
+                abbreviations: vec!["Rd".into()],
+                notes: None,
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id,
+                username: Some("chris".into()),
+                ..Default::default()
+            }).unwrap();
+            account_id = a.id;
+            passwords::insert(v, passwords::NewPassword {
+                account_id: a.id,
+                plaintext: "old-password",
+                source: "manual".into(),
+                confidence: passwords::Confidence::Certain,
+                notes: None,
+                created_at: None,
+            }).unwrap();
+            // set_current retires the previous entry and inserts a new current.
+            passwords::set_current(v, a.id, "current-password", "manual").unwrap();
+        }
+        let detail = get_account_inner(&state, account_id).unwrap();
+        assert_eq!(detail.site_name, "Reddit");
+        assert_eq!(detail.site_url.as_deref(), Some("reddit.com"));
+        assert_eq!(detail.site_category.as_deref(), Some("Social"));
+        assert_eq!(detail.site_abbreviations, vec!["Rd".to_string()]);
+        assert_eq!(detail.username.as_deref(), Some("chris"));
+        assert_eq!(detail.history.len(), 2);
+        // Exactly one is_current entry.
+        let current_count = detail.history.iter().filter(|h| h.is_current).count();
+        assert_eq!(current_count, 1);
     }
 
     #[test]

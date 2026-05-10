@@ -19,6 +19,18 @@ pub enum GuiError {
     Internal(String),
 }
 
+impl From<std::io::Error> for GuiError {
+    fn from(e: std::io::Error) -> Self {
+        GuiError::Internal(format!("io: {e}"))
+    }
+}
+
+impl From<rusqlite::Error> for GuiError {
+    fn from(e: rusqlite::Error) -> Self {
+        GuiError::Internal(format!("sqlite: {e}"))
+    }
+}
+
 impl From<passhound_core::error::Error> for GuiError {
     fn from(e: passhound_core::error::Error) -> Self {
         use passhound_core::error::Error as E;
