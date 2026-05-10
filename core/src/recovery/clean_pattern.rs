@@ -141,16 +141,22 @@ pub fn is_clean(segments: &[Segment]) -> bool {
 }
 
 /// Combined decompose + is_clean check with zero heap allocations.
-/// Returns `true` iff the password fully decomposes into recognized segments
-/// AND passes the is_clean predicate. Use this in the hot scoring path instead
-/// of `decompose(..).map(|s| is_clean(&s)).unwrap_or(false)`.
-pub fn is_clean_pattern(password: &str, ctx: &RecoverContext<'_>) -> bool {
+/// Returns the count of distinct segment types observed (1-4) when the
+/// password is clean per the is_clean rule, else 0.
+///
+/// Used by `ranking::score` to scale the clean-pattern bonus by
+/// compositional density: 4 distinct types → full bonus, fewer →
+/// proportionally less. Without this scaling, competitor patterns like
+/// `beammoon2020Rd` (3 distinct types: F,D,A) score equally to target
+/// patterns like `MoonBeam$2019Rd` (4 distinct types: F,S,D,A) and
+/// out-rank via len_match.
+pub fn is_clean_pattern(password: &str, ctx: &RecoverContext<'_>) -> u8 {
     if !password.is_ascii() {
-        return false;
+        return 0;
     }
     let bytes = password.as_bytes();
     if bytes.is_empty() {
-        return false;
+        return 0;
     }
 
     let fav_iter = || {
@@ -166,9 +172,11 @@ pub fn is_clean_pattern(password: &str, ctx: &RecoverContext<'_>) -> bool {
         })
     };
 
-    // Track only what is_clean needs: presence of any year-shaped DigitRun
-    // (length >= 4), last segment, and second-to-last segment (for the
-    // trailing-SymbolRun check).
+    // Track presence flags for distinct-type counting + the year-rule gate.
+    let mut seen_favorite = false;
+    let mut seen_digit_run = false;
+    let mut seen_symbol_run = false;
+    let mut seen_abbrev = false;
     let mut has_year_digit_run = false;
     let mut prev_seg: Option<Segment> = None; // second-to-last segment
     let mut last_seg: Option<Segment> = None; // last segment
@@ -179,9 +187,11 @@ pub fn is_clean_pattern(password: &str, ctx: &RecoverContext<'_>) -> bool {
         if let Some(consumed) = match_longest_ascii(bytes, i, fav_iter()) {
             i += consumed;
             seg = Segment::Favorite;
+            seen_favorite = true;
         } else if let Some(consumed) = match_longest_ascii(bytes, i, abbrev_iter()) {
             i += consumed;
             seg = Segment::Abbrev;
+            seen_abbrev = true;
         } else if bytes[i].is_ascii_digit() {
             let start = i;
             while i < bytes.len() && bytes[i].is_ascii_digit() {
@@ -192,25 +202,34 @@ pub fn is_clean_pattern(password: &str, ctx: &RecoverContext<'_>) -> bool {
                 has_year_digit_run = true;
             }
             seg = Segment::DigitRun(run_len);
+            seen_digit_run = true;
         } else if !(bytes[i] as char).is_ascii_alphanumeric() {
             while i < bytes.len() && !(bytes[i] as char).is_ascii_alphanumeric() {
                 i += 1;
             }
             seg = Segment::SymbolRun;
+            seen_symbol_run = true;
         } else {
-            return false; // unmatched alpha
+            return 0; // unmatched alpha
         }
         prev_seg = last_seg;
         last_seg = Some(seg);
     }
 
     // Apply is_clean rules.
-    if !has_year_digit_run { return false; }
-    match last_seg {
+    if !has_year_digit_run { return 0; }
+    let last_ok = match last_seg {
         None => false,
         Some(Segment::Favorite) | Some(Segment::DigitRun(_)) | Some(Segment::Abbrev) => true,
         Some(Segment::SymbolRun) => matches!(prev_seg, None | Some(Segment::Favorite)),
-    }
+    };
+    if !last_ok { return 0; }
+
+    // Clean. Return distinct-type count.
+    (seen_favorite as u8)
+        + (seen_digit_run as u8)
+        + (seen_symbol_run as u8)
+        + (seen_abbrev as u8)
 }
 
 #[cfg(test)]

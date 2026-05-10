@@ -45,15 +45,21 @@ pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
         + W_FAV_BASE * fav
         + W_LEN * len
         + W_ORIG_CASING * orig;
-    // Clean-pattern bonus (Phase 3.8): additive +W_CLEAN_PATTERN when the
-    // password fully decomposes into recognized segments and ends in a
-    // natural terminator. Applied inside ranking::score (not as a
-    // ScoreModifier) so the bonus influences intermediate cap truncation
-    // — the Phase 3.7 trace showed `MoonBeam$2019Rd` was dropped during
-    // pass 1 SpecialSuffix's hint-partition truncation, which sorts by
-    // ranking::score. Score modifiers run after the pipeline, too late.
-    if clean_pattern::is_clean_pattern(c.password.as_str(), ctx) {
-        total += W_CLEAN_PATTERN;
+    // Clean-pattern bonus (Phase 3.8 + 3.9): additive bonus scaled by the
+    // count of DISTINCT segment types in the decomposition. Returns 0..=4:
+    //   0 -> dirty (no bonus)
+    //   1..=4 -> clean with that many distinct types
+    // Applied inside ranking::score (not as a ScoreModifier) so the bonus
+    // influences intermediate cap truncation — the Phase 3.7 trace showed
+    // `MoonBeam$2019Rd` was dropped during pass 1 SpecialSuffix's
+    // hint-partition truncation, which sorts by ranking::score. Score
+    // modifiers run after the pipeline, too late. Phase 3.9's distinct-type
+    // scaling rewards the user-pattern shape `<F><S><D><A>` (4 types) over
+    // `<F><F><D><A>` (3 types: no symbol separator) which was crowding
+    // the target out via len_match.
+    let diversity = clean_pattern::is_clean_pattern(c.password.as_str(), ctx);
+    if diversity > 0 {
+        total += W_CLEAN_PATTERN * (diversity as f32) / 4.0;
     }
     total
 }
