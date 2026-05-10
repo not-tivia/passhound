@@ -31,6 +31,11 @@ impl From<passhound_core::error::Error> for GuiError {
             E::Aead => GuiError::WrongPassword,
             E::AlreadyExists => GuiError::AlreadyExists,
             E::InvalidInput(s) => GuiError::InvalidInput(s),
+            // Catch-all for: Io, Sqlite, Argon2, Import, NeedsColumnMapping,
+            // EmptyVault, EraNotFound. None of these are user-actionable in a
+            // distinct way at the GUI level — surface as a generic internal
+            // error. Add a specific arm here if a future variant needs its
+            // own UI treatment.
             other => GuiError::Internal(other.to_string()),
         }
     }

@@ -3,3 +3,5 @@
 *.db
 *.vault
 .DS_Store
+
+.superpowers/
