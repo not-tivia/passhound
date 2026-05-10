@@ -150,29 +150,6 @@ fn dedup_exact(v: &mut Vec<Candidate>) {
     v.retain(|_| { let k = keep[idx]; idx += 1; k });
 }
 
-fn promise_score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
-    let prov = c.provenance.len() as f32;
-    let recency = match c.seed_history_id {
-        Some(id) => {
-            let pos = ctx.pool.seeds.iter().position(|s| s.history_id == id);
-            match pos {
-                Some(i) => 1.0 - (i as f32 / ctx.pool.seeds.len().max(1) as f32) * 0.9,
-                None => 0.5,
-            }
-        }
-        None => 0.5,
-    };
-    // Hint-biased: when cfg.hint is set, candidates whose password contains the
-    // hint substring (case-insensitive) get a 2x boost during intermediate
-    // truncation so they survive the cap. Without this, multi-pass can prune
-    // hint-relevant candidates in favor of high-provenance non-relevant chains.
-    let hint_match = match &ctx.config.hint {
-        Some(h) if c.password.to_lowercase().contains(&h.to_lowercase()) => 2.0,
-        _ => 1.0,
-    };
-    prov * recency * hint_match
-}
-
 fn satisfies_constraints(c: &Candidate, cfg: &RecoverConfig) -> bool {
     if let Some(min_len) = cfg.min_length {
         if c.password.len() < min_len { return false; }
