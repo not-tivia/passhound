@@ -2575,6 +2575,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "passhound-core",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
