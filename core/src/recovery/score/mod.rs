@@ -24,3 +24,10 @@ pub const W_FREQ: f32         = 0.10;
 pub const W_FAV_BASE: f32     = 0.10;
 pub const W_LEN: f32          = 0.05;
 pub const W_ORIG_CASING: f32  = 0.20;
+
+// Phase 3.8 — additive (not in the convex sum) bonus for candidates whose
+// password fully decomposes into recognized segments AND ends in a natural
+// terminator (Favorite / DigitRun / Abbrev, or SymbolRun directly after a
+// Favorite). See `clean_pattern.rs` for the decomposition rules. Score range
+// becomes [0, 1.05] when this bonus fires.
+pub const W_CLEAN_PATTERN: f32 = 0.05;
