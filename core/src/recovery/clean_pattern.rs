@@ -29,83 +29,86 @@ pub enum Segment {
 }
 
 /// Greedy decomposition. Returns `Some(segments)` if the entire password is
-/// consumed by recognized segments, else `None`.
+/// consumed by recognized segments, else `None`. ASCII fast-path: non-ASCII
+/// passwords bail early (decomposition fails -> no clean bonus, same
+/// conservative behavior as a fully-failed match). Zero heap allocations:
+/// candidate sets are iterated directly from the pool.
 pub fn decompose(password: &str, ctx: &RecoverContext<'_>) -> Option<Vec<Segment>> {
-    let bytes_lower: Vec<char> = password.chars().flat_map(|c| c.to_lowercase()).collect();
-    // We index by char to support arbitrary unicode safely. Build a parallel
-    // raw char vector so symbol/digit checks operate on the original chars.
-    let raw: Vec<char> = password.chars().collect();
-    if raw.len() != bytes_lower.len() {
-        // Lowercasing changed char count (e.g. 'İ' -> "i\u{0307}"); bail.
-        // Recovery candidates are ASCII-dominated; this branch is defensive.
+    if !password.is_ascii() {
         return None;
     }
+    let bytes = password.as_bytes();
 
-    let favorites: Vec<&str> = ctx
-        .pool
-        .all_base_words
-        .iter()
-        .map(|w| w.canonical.as_str())
-        .collect();
-    let abbrevs: Vec<&str> = ctx
-        .pool
-        .site_abbreviations
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
+    // Build iterators over ASCII candidate byte-slices from the pool — no Vec
+    // allocation. Non-ASCII entries are skipped (eq_ignore_ascii_case only
+    // handles A-Z <-> a-z; non-ASCII would silently mis-match).
+    let fav_iter = || {
+        ctx.pool.all_base_words.iter().filter_map(|w| {
+            let s = w.canonical.as_str();
+            if s.is_ascii() && !s.is_empty() { Some(s.as_bytes()) } else { None }
+        })
+    };
+    let abbrev_iter = || {
+        ctx.pool.site_abbreviations.iter().filter_map(|s| {
+            let s = s.as_str();
+            if s.is_ascii() && !s.is_empty() { Some(s.as_bytes()) } else { None }
+        })
+    };
 
     let mut out: Vec<Segment> = Vec::new();
     let mut i = 0;
-    while i < raw.len() {
-        // 1. Favorite: longest base-word prefix match.
-        if let Some(consumed) = match_longest_alpha(&bytes_lower, i, &favorites) {
+    while i < bytes.len() {
+        // 1. Favorite: longest base-word prefix match (case-insensitive).
+        if let Some(consumed) = match_longest_ascii(bytes, i, fav_iter()) {
             out.push(Segment::Favorite);
             i += consumed;
             continue;
         }
-        // 2. Abbrev: longest abbreviation prefix match.
-        if let Some(consumed) = match_longest_alpha(&bytes_lower, i, &abbrevs) {
+        // 2. Abbrev: longest abbreviation prefix match (case-insensitive).
+        if let Some(consumed) = match_longest_ascii(bytes, i, abbrev_iter()) {
             out.push(Segment::Abbrev);
             i += consumed;
             continue;
         }
         // 3. Digit run.
-        if raw[i].is_ascii_digit() {
-            while i < raw.len() && raw[i].is_ascii_digit() {
+        if bytes[i].is_ascii_digit() {
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
                 i += 1;
             }
             out.push(Segment::DigitRun);
             continue;
         }
-        // 4. Symbol run (any non-alphanumeric).
-        if !raw[i].is_alphanumeric() {
-            while i < raw.len() && !raw[i].is_alphanumeric() {
+        // 4. Symbol run (anything that's not alphanumeric ASCII at this point).
+        if !(bytes[i] as char).is_ascii_alphanumeric() {
+            while i < bytes.len() && !(bytes[i] as char).is_ascii_alphanumeric() {
                 i += 1;
             }
             out.push(Segment::SymbolRun);
             continue;
         }
-        // No matcher fires — decomposition fails.
+        // ASCII letter that didn't match any favorite/abbrev — decomposition fails.
         return None;
     }
     Some(out)
 }
 
-/// Returns the number of chars consumed when one of `candidates` (lowercased
-/// alpha tokens) is a prefix of `lowered[start..]`. Picks the LONGEST match.
-fn match_longest_alpha(lowered: &[char], start: usize, candidates: &[&str]) -> Option<usize> {
+/// Returns the number of bytes consumed when one of `candidates` is a prefix
+/// of `haystack[start..]` (ASCII case-insensitive). Picks the LONGEST match.
+/// Both `haystack` and each yielded `cand` must be ASCII.
+fn match_longest_ascii<'a>(
+    haystack: &[u8],
+    start: usize,
+    candidates: impl Iterator<Item = &'a [u8]>,
+) -> Option<usize> {
     let mut best: Option<usize> = None;
     for cand in candidates {
-        if cand.is_empty() {
+        let len = cand.len();
+        if start + len > haystack.len() {
             continue;
         }
-        let cand_chars: Vec<char> = cand.chars().flat_map(|c| c.to_lowercase()).collect();
-        if start + cand_chars.len() > lowered.len() {
-            continue;
-        }
-        if lowered[start..start + cand_chars.len()] == cand_chars[..] {
-            if best.map_or(true, |b| cand_chars.len() > b) {
-                best = Some(cand_chars.len());
+        if haystack[start..start + len].eq_ignore_ascii_case(cand) {
+            if best.map_or(true, |b| len > b) {
+                best = Some(len);
             }
         }
     }
@@ -130,6 +133,74 @@ pub fn is_clean(segments: &[Segment]) -> bool {
             segments.iter().rev().nth(1),
             None | Some(Segment::Favorite),
         ),
+    }
+}
+
+/// Combined decompose + is_clean check with zero heap allocations.
+/// Returns `true` iff the password fully decomposes into recognized segments
+/// AND passes the is_clean predicate. Use this in the hot scoring path instead
+/// of `decompose(..).map(|s| is_clean(&s)).unwrap_or(false)`.
+pub fn is_clean_pattern(password: &str, ctx: &RecoverContext<'_>) -> bool {
+    if !password.is_ascii() {
+        return false;
+    }
+    let bytes = password.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+
+    let fav_iter = || {
+        ctx.pool.all_base_words.iter().filter_map(|w| {
+            let s = w.canonical.as_str();
+            if s.is_ascii() && !s.is_empty() { Some(s.as_bytes()) } else { None }
+        })
+    };
+    let abbrev_iter = || {
+        ctx.pool.site_abbreviations.iter().filter_map(|s| {
+            let s = s.as_str();
+            if s.is_ascii() && !s.is_empty() { Some(s.as_bytes()) } else { None }
+        })
+    };
+
+    // Track only what is_clean needs: presence of DigitRun, last segment,
+    // and second-to-last segment (for trailing-SymbolRun check).
+    let mut has_digit_run = false;
+    let mut prev_seg: Option<Segment> = None; // second-to-last segment
+    let mut last_seg: Option<Segment> = None; // last segment
+
+    let mut i = 0;
+    while i < bytes.len() {
+        let seg;
+        if let Some(consumed) = match_longest_ascii(bytes, i, fav_iter()) {
+            i += consumed;
+            seg = Segment::Favorite;
+        } else if let Some(consumed) = match_longest_ascii(bytes, i, abbrev_iter()) {
+            i += consumed;
+            seg = Segment::Abbrev;
+        } else if bytes[i].is_ascii_digit() {
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            seg = Segment::DigitRun;
+            has_digit_run = true;
+        } else if !(bytes[i] as char).is_ascii_alphanumeric() {
+            while i < bytes.len() && !(bytes[i] as char).is_ascii_alphanumeric() {
+                i += 1;
+            }
+            seg = Segment::SymbolRun;
+        } else {
+            return false; // unmatched alpha
+        }
+        prev_seg = last_seg;
+        last_seg = Some(seg);
+    }
+
+    // Apply is_clean rules.
+    if !has_digit_run { return false; }
+    match last_seg {
+        None => false,
+        Some(Segment::Favorite) | Some(Segment::DigitRun) | Some(Segment::Abbrev) => true,
+        Some(Segment::SymbolRun) => matches!(prev_seg, None | Some(Segment::Favorite)),
     }
 }
 

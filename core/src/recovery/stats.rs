@@ -80,8 +80,8 @@ impl HistoryStats {
 
 pub fn count_trailing_digits(s: &str) -> u8 {
     let mut n: u8 = 0;
-    for c in s.chars().rev() {
-        if c.is_ascii_digit() {
+    for &b in s.as_bytes().iter().rev() {
+        if b.is_ascii_digit() {
             n = n.saturating_add(1);
         } else {
             break;
@@ -91,10 +91,23 @@ pub fn count_trailing_digits(s: &str) -> u8 {
 }
 
 pub fn trailing_year(s: &str) -> Option<u16> {
-    let trailing: String = s.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>().chars().rev().collect();
-    if trailing.len() < 4 { return None; }
-    let last4 = &trailing[trailing.len() - 4..];
-    last4.parse::<u16>().ok().filter(|&y| (1990..=2099).contains(&y))
+    // Zero-allocation: work on bytes (years are ASCII digits).
+    let b = s.as_bytes();
+    let mut end = b.len();
+    // Find start of trailing digit run.
+    let mut start = end;
+    while start > 0 && b[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    let digit_len = end - start;
+    if digit_len < 4 { return None; }
+    // Take last 4 digits of the run.
+    let d = &b[end - 4..end];
+    let year: u16 = (d[0] - b'0') as u16 * 1000
+        + (d[1] - b'0') as u16 * 100
+        + (d[2] - b'0') as u16 * 10
+        + (d[3] - b'0') as u16;
+    if (1990..=2099).contains(&year) { Some(year) } else { None }
 }
 
 #[cfg(test)]

@@ -30,8 +30,9 @@ pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
         }
     };
     let hint = match &ctx.config.hint {
-        Some(h) if c.password.to_lowercase().contains(&h.to_lowercase()) => 1.0,
-        Some(_) => 0.0,
+        Some(h) => {
+            if ascii_contains_ignore_case(c.password.as_str(), h.as_str()) { 1.0 } else { 0.0 }
+        }
         None => 0.5,
     };
     let freq = pattern_freq_match(c, ctx);
@@ -51,10 +52,7 @@ pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
     // — the Phase 3.7 trace showed `MoonBeam$2019Rd` was dropped during
     // pass 1 SpecialSuffix's hint-partition truncation, which sorts by
     // ranking::score. Score modifiers run after the pipeline, too late.
-    let is_clean_pattern = clean_pattern::decompose(c.password.as_str(), ctx)
-        .map(|segs| clean_pattern::is_clean(&segs))
-        .unwrap_or(false);
-    if is_clean_pattern {
+    if clean_pattern::is_clean_pattern(c.password.as_str(), ctx) {
         total += W_CLEAN_PATTERN;
     }
     total
@@ -75,13 +73,33 @@ fn pattern_freq_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
 }
 
 fn contains_any_favorite(c: &Candidate, ctx: &RecoverContext<'_>) -> bool {
-    let lower = c.password.to_lowercase();
-    ctx.pool.favorite_base_words.iter().any(|w| lower.contains(w.canonical.as_str()))
+    ctx.pool.favorite_base_words.iter().any(|w| {
+        ascii_contains_ignore_case(c.password.as_str(), w.canonical.as_str())
+    })
 }
 
 fn contains_site_abbrev(c: &Candidate, ctx: &RecoverContext<'_>) -> bool {
-    let lower = c.password.to_lowercase();
-    ctx.pool.site_abbreviations.iter().any(|a| !a.is_empty() && lower.contains(&a.to_lowercase()))
+    ctx.pool.site_abbreviations.iter().any(|a| {
+        !a.is_empty() && ascii_contains_ignore_case(c.password.as_str(), a.as_str())
+    })
+}
+
+/// Case-insensitive substring search for ASCII-dominated strings.
+/// Falls back to allocating `to_lowercase()` when either input is non-ASCII.
+fn ascii_contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if haystack.is_ascii() && needle.is_ascii() {
+        let h = haystack.as_bytes();
+        let n = needle.as_bytes();
+        if n.len() > h.len() {
+            return false;
+        }
+        h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
+    } else {
+        haystack.to_lowercase().contains(&needle.to_lowercase())
+    }
 }
 
 fn length_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
