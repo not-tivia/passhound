@@ -1,6 +1,9 @@
 //! Linear weighted-sum scorer.
 
-use crate::recovery::score::{W_FAV_BASE, W_FREQ, W_HINT, W_LEN, W_ORIG_CASING, W_SITE};
+use crate::recovery::clean_pattern;
+use crate::recovery::score::{
+    W_CLEAN_PATTERN, W_FAV_BASE, W_FREQ, W_HINT, W_LEN, W_ORIG_CASING, W_SITE,
+};
 use crate::recovery::stats::{count_trailing_digits, trailing_year};
 use crate::recovery::{Candidate, RecoverContext, RuleId};
 
@@ -35,7 +38,26 @@ pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
     let fav  = if contains_any_favorite(c, ctx) { 1.0 } else { 0.0 };
     let len  = length_match(c, ctx);
     let orig = if c.provenance.contains(&RuleId::OriginalCasing) { 1.0 } else { 0.0 };
-    W_SITE * site + W_HINT * hint + W_FREQ * freq + W_FAV_BASE * fav + W_LEN * len + W_ORIG_CASING * orig
+    let mut total = W_SITE * site
+        + W_HINT * hint
+        + W_FREQ * freq
+        + W_FAV_BASE * fav
+        + W_LEN * len
+        + W_ORIG_CASING * orig;
+    // Clean-pattern bonus (Phase 3.8): additive +W_CLEAN_PATTERN when the
+    // password fully decomposes into recognized segments and ends in a
+    // natural terminator. Applied inside ranking::score (not as a
+    // ScoreModifier) so the bonus influences intermediate cap truncation
+    // — the Phase 3.7 trace showed `MoonBeam$2019Rd` was dropped during
+    // pass 1 SpecialSuffix's hint-partition truncation, which sorts by
+    // ranking::score. Score modifiers run after the pipeline, too late.
+    let is_clean_pattern = clean_pattern::decompose(c.password.as_str(), ctx)
+        .map(|segs| clean_pattern::is_clean(&segs))
+        .unwrap_or(false);
+    if is_clean_pattern {
+        total += W_CLEAN_PATTERN;
+    }
+    total
 }
 
 fn pattern_freq_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
@@ -213,5 +235,55 @@ mod tests {
         };
         assert!(score(&with_oc, &rc) > score(&without_oc, &rc),
             "OriginalCasing in provenance must boost score");
+    }
+
+    #[test]
+    fn clean_pattern_bonus_increases_score() {
+        // Two candidates with identical other factors: same provenance, same
+        // length, same hint match, same site abbrev, same favorite. The only
+        // difference is one is "clean" (last seg = Abbrev) and the other has a
+        // trailing extra symbol (last seg = SymbolRun after Abbrev → dirty).
+        let p = Pool {
+            seeds: vec![],
+            favorite_base_words: vec![DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("moon".into()),
+                original: Zeroizing::new("Moon".into()),
+            }, DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("beam".into()),
+                original: Zeroizing::new("Beam".into()),
+            }],
+            all_base_words: vec![DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("moon".into()),
+                original: Zeroizing::new("Moon".into()),
+            }, DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("beam".into()),
+                original: Zeroizing::new("Beam".into()),
+            }],
+            site_abbreviations: vec!["Rd".into()],
+            era_window: None,
+        };
+        let s = HistoryStats::default();
+        let mut c = RecoverConfig::default();
+        c.site = Some("Reddit".into());
+        c.hint = Some("moon".into());
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let clean = Candidate {
+            password: Zeroizing::new("MoonBeam$2019Rd".into()),
+            score: 0.0,
+            provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
+            seed_history_id: None,
+        };
+        let dirty = Candidate {
+            password: Zeroizing::new("MoonBeam$2019Rd!".into()),
+            score: 0.0,
+            provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
+            seed_history_id: None,
+        };
+        let s_clean = score(&clean, &rc);
+        let s_dirty = score(&dirty, &rc);
+        assert!(
+            s_clean > s_dirty,
+            "clean pattern must outrank dirty trailing-symbol child; got clean={s_clean} dirty={s_dirty}"
+        );
     }
 }
