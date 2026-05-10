@@ -2,13 +2,17 @@
 //!
 //! Used by `ranking::score` to detect "clean" compositional patterns
 //! (e.g. `MoonBeam$2019Rd` — favorite + favorite + symbol + digits + abbrev)
-//! and award a structural bonus. A candidate is "clean" when:
+//! and award a structural bonus. A candidate is "clean" when ALL of:
 //!   1. The entire password decomposes into a sequence of recognized segments
 //!      (favorite base word, digit run, symbol run, or site abbreviation).
-//!   2. The last segment is a "natural terminator": Favorite, DigitRun,
-//!      Abbrev, OR SymbolRun immediately following a Favorite (so `Thunder!`
-//!      is clean but `MoonBeam$2019Rd!` is not — the trailing `!` follows an
-//!      Abbrev, not a Favorite).
+//!   2. Segments contain at least one `DigitRun`. Patterns without digits
+//!      (e.g. `Thunder!`, `Rdthundermoon!`) are technically composable but
+//!      get out-competed by `*!` variants via W_FREQ; the digit-run
+//!      requirement gates the bonus to compositions that encode time/era.
+//!   3. The last segment is a "natural terminator": Favorite, DigitRun,
+//!      Abbrev, OR SymbolRun immediately following a Favorite (so trailing
+//!      punctuation past digits or an abbrev is rejected, e.g.
+//!      `MoonBeam$2019Rd!` is dirty — last `!` follows an Abbrev).
 //!
 //! Greedy left-to-right matcher; priority Favorite > Abbrev > DigitRun > SymbolRun
 //! at each position. Favorites and abbreviations are matched case-insensitive
@@ -113,6 +117,13 @@ pub fn is_clean(segments: &[Segment]) -> bool {
     let Some(last) = segments.last() else {
         return false;
     };
+    // Require at least one DigitRun: compositions encoding time/era
+    // (e.g. year suffix) are the user-pattern shape this bonus targets.
+    // Without this gate, `Rdthundermoon!`-style patterns score equally
+    // and crowd out the actual target during cap truncation.
+    if !segments.iter().any(|s| matches!(s, Segment::DigitRun)) {
+        return false;
+    }
     match last {
         Segment::Favorite | Segment::DigitRun | Segment::Abbrev => true,
         Segment::SymbolRun => matches!(
@@ -209,7 +220,8 @@ mod tests {
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let segs = decompose("MoonBeam", &rc).expect("must decompose");
         assert_eq!(segs, vec![Segment::Favorite, Segment::Favorite]);
-        assert!(is_clean(&segs));
+        // No DigitRun -> not clean under the digit-gated rule.
+        assert!(!is_clean(&segs));
     }
 
     #[test]
@@ -240,21 +252,24 @@ mod tests {
     }
 
     #[test]
-    fn decompose_favorite_alone_is_clean() {
+    fn decompose_favorite_alone_is_dirty_no_digits() {
         let (p, s, c) = ctx_with(&["thunder"], &[]);
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let segs = decompose("Thunder", &rc).expect("must decompose");
         assert_eq!(segs, vec![Segment::Favorite]);
-        assert!(is_clean(&segs));
+        // Single-favorite, no DigitRun -> not clean.
+        assert!(!is_clean(&segs));
     }
 
     #[test]
-    fn decompose_favorite_plus_symbol_is_clean() {
+    fn decompose_favorite_plus_symbol_is_dirty_no_digits() {
         let (p, s, c) = ctx_with(&["thunder"], &[]);
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let segs = decompose("Thunder!!", &rc).expect("must decompose");
         assert_eq!(segs, vec![Segment::Favorite, Segment::SymbolRun]);
-        assert!(is_clean(&segs), "trailing sym immediately after favorite is clean");
+        // No DigitRun -> not clean. (Last-segment rule alone would say clean,
+        // but the digit-gated rule rejects this pattern.)
+        assert!(!is_clean(&segs));
     }
 
     #[test]
@@ -293,11 +308,10 @@ mod tests {
     }
 
     #[test]
-    fn is_clean_pure_symbols_only_segment_returns_true() {
-        // No previous segment before the trailing SymbolRun -> clean per the
-        // rule (matches!(... None | Some(Favorite))). Edge case; passwords of
-        // pure punctuation are unlikely in practice.
+    fn is_clean_pure_symbols_only_segment_returns_false() {
+        // No DigitRun -> not clean. (Even ignoring digits, edge case for
+        // a pure-punctuation password is unlikely in practice.)
         let segs = vec![Segment::SymbolRun];
-        assert!(is_clean(&segs));
+        assert!(!is_clean(&segs));
     }
 }
