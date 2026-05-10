@@ -39,6 +39,7 @@ pub enum RuleId {
     NumberIncrement,
     LeetSwap,
     EraBoost,
+    OriginalCasing,
 }
 
 impl RuleId {
@@ -53,6 +54,7 @@ impl RuleId {
             RuleId::NumberIncrement => "F",
             RuleId::LeetSwap        => "LEET",
             RuleId::EraBoost        => "H",
+            RuleId::OriginalCasing  => "ORIG",
         }
     }
     pub fn name(&self) -> &'static str {
@@ -65,6 +67,7 @@ impl RuleId {
             RuleId::NumberIncrement => "NumberIncrement",
             RuleId::LeetSwap        => "LeetSwap",
             RuleId::EraBoost        => "EraBoost",
+            RuleId::OriginalCasing  => "OriginalCasing",
         }
     }
 }
@@ -135,7 +138,7 @@ mod tests {
         for r in [
             RuleId::BaseWordPool, RuleId::WordCombine, RuleId::CaseVariations,
             RuleId::SpecialSuffix, RuleId::SiteAffix, RuleId::NumberIncrement,
-            RuleId::LeetSwap, RuleId::EraBoost,
+            RuleId::LeetSwap, RuleId::EraBoost, RuleId::OriginalCasing,
         ] {
             assert!(!r.tag().is_empty());
             assert!(!r.name().is_empty());

@@ -1,14 +1,31 @@
 //! Linear weighted-sum scorer.
 
-use crate::recovery::score::{W_FAV_BASE, W_FREQ, W_HINT, W_LEN, W_SITE};
+use crate::recovery::score::{W_FAV_BASE, W_FREQ, W_HINT, W_LEN, W_ORIG_CASING, W_SITE};
 use crate::recovery::stats::{count_trailing_digits, trailing_year};
-use crate::recovery::{Candidate, RecoverContext};
+use crate::recovery::{Candidate, RecoverContext, RuleId};
 
 pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
-    let site = c.seed_history_id
+    // Site signal: prefer the seed-derived site_match_strength when the candidate
+    // descends from a real history seed. For generated candidates (BaseWordPool /
+    // WordCombine, no seed_history_id) fall back to a post-hoc check: when the
+    // user passed --site, reward candidates whose password contains any
+    // configured site abbreviation (case-insensitive). Without this, synthesis
+    // chains like "MoonBeam$2019Rd" get a neutral 0.5 site score and lose to
+    // shorter hint-matched chains like "thunder-moon!!" which the W_SITE
+    // weight should otherwise discriminate against.
+    let site_seed = c.seed_history_id
         .and_then(|id| ctx.pool.seeds.iter().find(|s| s.history_id == id))
-        .map(|s| s.site_match_strength)
-        .unwrap_or(0.5); // candidates with no seed (BaseWordPool/WordCombine) get neutral site signal.
+        .map(|s| s.site_match_strength);
+    let site = match site_seed {
+        Some(s) => s,
+        None => {
+            if ctx.config.site.is_some() && contains_site_abbrev(c, ctx) {
+                1.0
+            } else {
+                0.5
+            }
+        }
+    };
     let hint = match &ctx.config.hint {
         Some(h) if c.password.to_lowercase().contains(&h.to_lowercase()) => 1.0,
         Some(_) => 0.0,
@@ -17,7 +34,8 @@ pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
     let freq = pattern_freq_match(c, ctx);
     let fav  = if contains_any_favorite(c, ctx) { 1.0 } else { 0.0 };
     let len  = length_match(c, ctx);
-    W_SITE * site + W_HINT * hint + W_FREQ * freq + W_FAV_BASE * fav + W_LEN * len
+    let orig = if c.provenance.contains(&RuleId::OriginalCasing) { 1.0 } else { 0.0 };
+    W_SITE * site + W_HINT * hint + W_FREQ * freq + W_FAV_BASE * fav + W_LEN * len + W_ORIG_CASING * orig
 }
 
 fn pattern_freq_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
@@ -39,6 +57,11 @@ fn contains_any_favorite(c: &Candidate, ctx: &RecoverContext<'_>) -> bool {
     ctx.pool.favorite_base_words.iter().any(|w| lower.contains(w.canonical.as_str()))
 }
 
+fn contains_site_abbrev(c: &Candidate, ctx: &RecoverContext<'_>) -> bool {
+    let lower = c.password.to_lowercase();
+    ctx.pool.site_abbreviations.iter().any(|a| !a.is_empty() && lower.contains(&a.to_lowercase()))
+}
+
 fn length_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
     if ctx.stats.mean_length == 0.0 { return 0.5; }
     let dist = (c.password.len() as f32 - ctx.stats.mean_length).abs();
@@ -48,7 +71,7 @@ fn length_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recovery::{DecryptedBaseWordEntry, HistoryStats, Pool, PoolSeed, RecoverConfig};
+    use crate::recovery::{DecryptedBaseWordEntry, HistoryStats, Pool, PoolSeed, RecoverConfig, RuleId};
     use crate::vault::Vault;
     use chrono::Utc;
     use std::collections::HashMap;
@@ -139,5 +162,56 @@ mod tests {
         let with = Candidate { password: Zeroizing::new("Fluffy123".into()), score: 0.0, provenance: vec![], seed_history_id: None };
         let without = Candidate { password: Zeroizing::new("Banana123".into()), score: 0.0, provenance: vec![], seed_history_id: None };
         assert!(score(&with, &rc) > score(&without, &rc));
+    }
+
+    #[test]
+    fn post_hoc_site_match_rewards_candidate_containing_abbrev() {
+        let p = Pool {
+            seeds: vec![],
+            favorite_base_words: vec![],
+            all_base_words: vec![],
+            site_abbreviations: vec!["Rd".into()],
+            era_window: None,
+        };
+        let s = HistoryStats::default();
+        let mut c = RecoverConfig::default();
+        c.site = Some("Reddit".into());
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let with_abbr = Candidate {
+            password: Zeroizing::new("MoonBeam$2019Rd".into()),
+            score: 0.0,
+            provenance: vec![],
+            seed_history_id: None,
+        };
+        let without = Candidate {
+            password: Zeroizing::new("MoonBeam$2019".into()),
+            score: 0.0,
+            provenance: vec![],
+            seed_history_id: None,
+        };
+        assert!(score(&with_abbr, &rc) > score(&without, &rc),
+            "containing site abbrev should bump score when --site is set");
+    }
+
+    #[test]
+    fn original_casing_provenance_boosts_score() {
+        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let with_oc = Candidate {
+            password: Zeroizing::new("MoonBeam".into()),
+            score: 0.0,
+            provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
+            seed_history_id: None,
+        };
+        let without_oc = Candidate {
+            password: Zeroizing::new("MoonBeam".into()),
+            score: 0.0,
+            provenance: vec![RuleId::WordCombine],
+            seed_history_id: None,
+        };
+        assert!(score(&with_oc, &rc) > score(&without_oc, &rc),
+            "OriginalCasing in provenance must boost score");
     }
 }

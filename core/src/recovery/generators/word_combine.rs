@@ -63,13 +63,15 @@ fn push_pair(out: &mut Vec<Candidate>, a_canon: &str, b_canon: &str, a_orig: &st
             provenance: vec![RuleId::WordCombine],
             seed_history_id: None,
         });
-        // Original casing — privileged variant. When canonical == original
-        // (legacy rows or all-lowercase favorites), this duplicates the as-is
-        // emission and gets collapsed by dedup downstream.
+        // Original casing — privileged variant tagged with RuleId::OriginalCasing
+        // so ranking::score awards the W_ORIG_CASING bonus. When canonical ==
+        // original (legacy rows or all-lowercase favorites), this duplicates the
+        // as-is emission but the dedup pass downstream merges provenance, so the
+        // OriginalCasing flag still attaches.
         out.push(Candidate {
             password: Zeroizing::new(format!("{a_orig}{sep}{b_orig}")),
             score: 0.0,
-            provenance: vec![RuleId::WordCombine],
+            provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
             seed_history_id: None,
         });
     }

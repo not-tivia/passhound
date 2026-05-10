@@ -14,9 +14,13 @@ pub static SCORE_MODIFIERS: &[&'static dyn ScoreModifier] = &[
     &era_boost::EraBoost,
 ];
 
-// Convex weights — sum to 1.0. See spec for rationale.
-pub const W_SITE: f32       = 0.30;
-pub const W_HINT: f32       = 0.25;
-pub const W_FREQ: f32       = 0.20;
-pub const W_FAV_BASE: f32   = 0.15;
-pub const W_LEN: f32        = 0.10;
+// Convex weights — sum to 1.0. Phase 3.7 lever 3 added W_ORIG_CASING and
+// rebalanced others; the goal is to make original-casing-derived synthesis
+// chains (e.g. MoonBeam$2019Rd from MoonBeam seed) outrank machine-variant
+// chains (e.g. thunder-moon!!) when both contain the user's hint substring.
+pub const W_SITE: f32         = 0.30;
+pub const W_HINT: f32         = 0.25;
+pub const W_FREQ: f32         = 0.10;
+pub const W_FAV_BASE: f32     = 0.10;
+pub const W_LEN: f32          = 0.05;
+pub const W_ORIG_CASING: f32  = 0.20;

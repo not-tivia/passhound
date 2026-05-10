@@ -21,13 +21,23 @@ impl Generator for BaseWordPool {
         // Dedup later collapses identical strings (when canonical == original, no
         // duplication beyond the existing x3 weighting).
         for w in &ctx.pool.favorite_base_words {
-            for variant in [w.canonical.as_str(), w.original.as_str()] {
+            // Iterate canonical and original separately so we can tag the
+            // original-casing emission with RuleId::OriginalCasing for the
+            // ranking bonus. When canonical == original, the bonus still
+            // attaches to one of the duplicate strings; dedup downstream
+            // collapses them into a single Candidate that retains the bonus.
+            for (variant, is_original) in [
+                (w.canonical.as_str(), false),
+                (w.original.as_str(), true),
+            ] {
                 for _ in 0..3 {
                     if out.len() >= MAX_OUTPUTS { return out; }
+                    let mut prov = vec![RuleId::BaseWordPool];
+                    if is_original { prov.push(RuleId::OriginalCasing); }
                     out.push(Candidate {
                         password: Zeroizing::new(variant.to_owned()),
                         score: 0.0,
-                        provenance: vec![RuleId::BaseWordPool],
+                        provenance: prov,
                         seed_history_id: None,
                     });
                 }
@@ -38,14 +48,18 @@ impl Generator for BaseWordPool {
         // canonical+original treatment, but no x3 weighting (only favorites
         // get that privilege).
         for w in &ctx.pool.all_base_words {
-            for variant in [w.canonical.as_str(), w.original.as_str()] {
+            for (variant, is_original) in [
+                (w.canonical.as_str(), false),
+                (w.original.as_str(), true),
+            ] {
                 if out.len() >= MAX_OUTPUTS { break; }
-                // Skip exact duplicates of variants already pushed.
                 if out.iter().any(|c| c.password.as_str() == variant) { continue; }
+                let mut prov = vec![RuleId::BaseWordPool];
+                if is_original { prov.push(RuleId::OriginalCasing); }
                 out.push(Candidate {
                     password: Zeroizing::new(variant.to_owned()),
                     score: 0.0,
-                    provenance: vec![RuleId::BaseWordPool],
+                    provenance: prov,
                     seed_history_id: None,
                 });
             }
@@ -153,7 +167,11 @@ mod tests {
         let cfg = RecoverConfig::default();
         let ctx = RecoverContext { vault: dummy_vault(), config: &cfg, pool: &pool, stats: &stats };
         let out = BaseWordPool.generate(&ctx);
-        assert!(out.iter().all(|c| c.provenance == vec![RuleId::BaseWordPool]));
+        // Emissions are either [BaseWordPool] (canonical) or
+        // [BaseWordPool, OriginalCasing] (original casing). Both must start
+        // with BaseWordPool.
+        assert!(out.iter().all(|c| c.provenance.first() == Some(&RuleId::BaseWordPool)));
+        assert!(out.iter().all(|c| c.provenance.iter().all(|r| matches!(r, RuleId::BaseWordPool | RuleId::OriginalCasing))));
     }
 
     #[test]
