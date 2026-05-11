@@ -3,3 +3,6 @@ dist/
 .tauri/
 target/
 gen/
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.js

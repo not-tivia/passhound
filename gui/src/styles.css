@@ -1,0 +1,43 @@
+:root {
+  --bg-0: #0d0d10;
+  --bg-1: #15151a;
+  --bg-2: #1a1a1f;
+  --border: #2a2a30;
+  --border-hover: #3a3a40;
+  --text-0: #fff;
+  --text-1: #ccc;
+  --text-2: #888;
+  --text-3: #666;
+  --accent: #ccaa66;
+  --error: #cc6666;
+  --selected: #252530;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: ui-monospace, SFMono-Regular, "Menlo", "Monaco", "Consolas", monospace;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+input {
+  font-family: inherit;
+  font-size: inherit;
+}
