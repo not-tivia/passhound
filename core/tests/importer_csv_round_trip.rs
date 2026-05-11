@@ -21,7 +21,7 @@ Amazon,amazon.com,chris@example.com,Bezos$Buy1,\n",
         )
         .unwrap();
 
-    let parse = csv_imp::parse_file(&v, csv_file.path(), None).unwrap();
+    let parse = csv_imp::parse_file(&v, csv_file.path(), None, None).unwrap();
     assert_eq!(parse.entries.len(), 2);
     let preview = pipeline::preview(&v, parse.entries).unwrap();
     assert_eq!(preview.new, 2);

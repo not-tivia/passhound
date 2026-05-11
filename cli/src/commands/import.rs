@@ -53,6 +53,11 @@ pub struct CsvArgs {
     /// Example: `--mapping site=Name,password=Pass`
     #[arg(long)]
     pub mapping: Option<String>,
+    /// Apply this site name to every row, ignoring any site column. Use for
+    /// per-site CSVs (e.g. one file per game/service) where the rows are
+    /// just login/password/notes without a site column.
+    #[arg(long)]
+    pub site: Option<String>,
     /// Print every classified entry (passwords are always redacted).
     #[arg(long)]
     pub show_conflicts: bool,
@@ -89,12 +94,13 @@ fn run_csv(vault_path: &Path, args: CsvArgs) -> Result<()> {
         None => None,
     };
 
-    let parse_result = match csv_imp::parse_file(&vault, &args.path, explicit_mapping) {
+    let site_override = args.site.clone();
+    let parse_result = match csv_imp::parse_file(&vault, &args.path, explicit_mapping, site_override.clone()) {
         Ok(r) => r,
         Err(passhound_core::Error::NeedsColumnMapping { headers }) => {
             let mapping = interactive_mapping(&headers)?;
             csv_imp::save_mapping(&vault, &headers, &mapping)?;
-            csv_imp::parse_file(&vault, &args.path, Some(mapping))?
+            csv_imp::parse_file(&vault, &args.path, Some(mapping), site_override)?
         }
         Err(e) => return Err(e.into()),
     };
@@ -224,8 +230,9 @@ fn parse_mapping_arg(s: &str, path: &Path) -> Result<Mapping> {
         }
     }
 
+    // `site` is optional now — caller may supply `--site NAME` to override.
     Ok(Mapping {
-        site: site.ok_or_else(|| anyhow::anyhow!("--mapping must include site=..."))?,
+        site,
         url,
         username,
         password: password.ok_or_else(|| anyhow::anyhow!("--mapping must include password=..."))?,
@@ -268,7 +275,8 @@ fn interactive_mapping(headers: &[String]) -> Result<Mapping> {
         }
     };
 
-    let site = prompt_idx("site", true, &mut buf)?.unwrap();
+    // site is optional — user can leave blank if they plan to pass --site NAME.
+    let site = prompt_idx("site", false, &mut buf)?;
     let url = prompt_idx("url", false, &mut buf)?;
     let username = prompt_idx("username", false, &mut buf)?;
     let password = prompt_idx("password", true, &mut buf)?.unwrap();

@@ -15,9 +15,12 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Column-index mapping from logical fields to CSV column indices.
+/// `site` is optional — when None, callers must supply a `site_override`
+/// to `parse_file` (e.g. via the CLI's `--site NAME` flag) so per-site CSVs
+/// that lack a site column can still import.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mapping {
-    pub site: usize,
+    pub site: Option<usize>,
     pub url: Option<usize>,
     pub username: Option<usize>,
     pub password: usize,
@@ -42,13 +45,14 @@ fn find_index(headers: &[String], synonyms: &[&str]) -> Option<usize> {
     None
 }
 
-/// Try to auto-detect a Mapping from the headers. Returns `None` if site or
-/// password can't be located.
+/// Try to auto-detect a Mapping from the headers. Returns `None` if
+/// `password` can't be located (the only strictly required column). The site
+/// column is optional in the mapping — `parse_file` enforces that either
+/// `Mapping.site` is set OR a `site_override` argument is supplied.
 pub fn auto_detect(headers: &[String]) -> Option<Mapping> {
-    let site = find_index(headers, SITE_SYNONYMS)?;
     let password = find_index(headers, PASSWORD_SYNONYMS)?;
     Some(Mapping {
-        site,
+        site: find_index(headers, SITE_SYNONYMS),
         url: find_index(headers, URL_SYNONYMS),
         username: find_index(headers, USERNAME_SYNONYMS),
         password,
@@ -120,7 +124,17 @@ pub fn save_mapping(vault: &Vault, headers: &[String], mapping: &Mapping) -> Res
 /// 2. Saved mapping in `vault_meta` for this header shape.
 /// 3. Auto-detect from synonyms.
 /// 4. `Err(Error::NeedsColumnMapping { headers })`.
-pub fn parse_file(vault: &Vault, path: &Path, mapping: Option<Mapping>) -> Result<ParseResult> {
+///
+/// `site_override` — when `Some(name)`, every imported row uses this site
+/// name and `Mapping.site` is ignored. Lets per-site CSVs (no site column)
+/// import via CLI `--site NAME`. When `None`, `Mapping.site` must be set
+/// or the parse rejects with a per-row "missing site" diagnostic.
+pub fn parse_file(
+    vault: &Vault,
+    path: &Path,
+    mapping: Option<Mapping>,
+    site_override: Option<String>,
+) -> Result<ParseResult> {
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(true)
         .flexible(true)
@@ -144,6 +158,14 @@ pub fn parse_file(vault: &Vault, path: &Path, mapping: Option<Mapping>) -> Resul
         },
     };
 
+    // If neither the mapping nor the override supplies a site, surface a
+    // single clear error rather than emitting "missing site" for every row.
+    if map.site.is_none() && site_override.is_none() {
+        return Err(Error::Import(
+            "no site column found in CSV; pass --site NAME or add a site column".into(),
+        ));
+    }
+
     let mut result = ParseResult::default();
     for (row_idx, rec) in rdr.records().enumerate() {
         let row_num = row_idx + 2;
@@ -160,15 +182,22 @@ pub fn parse_file(vault: &Vault, path: &Path, mapping: Option<Mapping>) -> Resul
         };
         let raw = rec.iter().collect::<Vec<_>>().join(",");
 
-        let site = match rec.get(map.site).map(|s| s.trim()) {
-            Some(s) if !s.is_empty() => s.to_string(),
-            _ => {
-                result.diagnostics.push(ParseDiagnostic {
-                    row: row_num,
-                    raw,
-                    reason: "missing site".to_string(),
-                });
-                continue;
+        let site = if let Some(name) = &site_override {
+            name.clone()
+        } else {
+            // map.site is guaranteed Some at this point — the up-front check
+            // at the top of parse_file rejects the file otherwise.
+            let idx = map.site.expect("map.site must be set when no site_override");
+            match rec.get(idx).map(|s| s.trim()) {
+                Some(s) if !s.is_empty() => s.to_string(),
+                _ => {
+                    result.diagnostics.push(ParseDiagnostic {
+                        row: row_num,
+                        raw,
+                        reason: "missing site".to_string(),
+                    });
+                    continue;
+                }
             }
         };
         let password = match rec.get(map.password).map(|s| s.trim()) {
@@ -246,7 +275,7 @@ mod tests {
 RuneScape,runescape.com,chris,Fluffy!2014,note1\n\
 Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let f = write_csv(content);
-        let r = parse_file(&v, f.path(), None).unwrap();
+        let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 2);
         assert_eq!(r.entries[0].site, "RuneScape");
         assert_eq!(r.entries[0].password, "Fluffy!2014");
@@ -258,22 +287,52 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let (_t, v) = vault();
         let content = "name,login,password\nFoo,user1,pw1\nBar,user2,pw2\n";
         let f = write_csv(content);
-        let r = parse_file(&v, f.path(), None).unwrap();
+        let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 2);
         assert_eq!(r.entries[0].username.as_deref(), Some("user1"));
     }
 
     #[test]
-    fn missing_required_column_returns_needs_mapping() {
+    fn missing_password_column_returns_needs_mapping() {
         let (_t, v) = vault();
-        let content = "username,password\nu,p\n";
+        // Phase 4.1+: only `password` is strictly required by auto_detect.
+        // No site column is fine when `--site NAME` is passed (or an explicit
+        // mapping supplies one). Test the password-missing case.
+        let content = "username,note\nu,n\n";
         let f = write_csv(content);
-        let err = parse_file(&v, f.path(), None).unwrap_err();
+        let err = parse_file(&v, f.path(), None, None).unwrap_err();
         match err {
             Error::NeedsColumnMapping { headers } => {
-                assert_eq!(headers, vec!["username".to_string(), "password".to_string()]);
+                assert_eq!(headers, vec!["username".to_string(), "note".to_string()]);
             }
             other => panic!("expected NeedsColumnMapping, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn site_override_imports_without_site_column() {
+        let (_t, v) = vault();
+        // CSV has no site column — just user/password/notes. With
+        // `site_override = Some("RuneScape")`, every row gets that site.
+        let content = "login,password,notes\nchris,Fluffy!2014,first acct\nchris2,Bezos$1,second acct\n";
+        let f = write_csv(content);
+        let r = parse_file(&v, f.path(), None, Some("RuneScape".into())).unwrap();
+        assert_eq!(r.entries.len(), 2);
+        assert_eq!(r.entries[0].site, "RuneScape");
+        assert_eq!(r.entries[0].username.as_deref(), Some("chris"));
+        assert_eq!(r.entries[0].password, "Fluffy!2014");
+        assert_eq!(r.entries[1].site, "RuneScape");
+    }
+
+    #[test]
+    fn no_site_and_no_override_rejects_with_clear_error() {
+        let (_t, v) = vault();
+        let content = "login,password\nu,p\n";
+        let f = write_csv(content);
+        let err = parse_file(&v, f.path(), None, None).unwrap_err();
+        match err {
+            Error::Import(msg) => assert!(msg.contains("--site"), "expected --site hint in: {msg}"),
+            other => panic!("expected Import error with --site hint, got {other:?}"),
         }
     }
 
@@ -283,14 +342,14 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let content = "label,word\nMySite,MyPass\n";
         let f = write_csv(content);
         let m = Mapping {
-            site: 0,
+            site: Some(0),
             url: None,
             username: None,
             password: 1,
             notes: None,
             created_at: None,
         };
-        let r = parse_file(&v, f.path(), Some(m)).unwrap();
+        let r = parse_file(&v, f.path(), Some(m), None).unwrap();
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.entries[0].site, "MySite");
     }
@@ -300,7 +359,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let (_t, v) = vault();
         let content = "name,password\nFoo,\nBar,baz\n";
         let f = write_csv(content);
-        let r = parse_file(&v, f.path(), None).unwrap();
+        let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.diagnostics.len(), 1);
     }
@@ -317,7 +376,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let (_t, v) = vault();
         let headers = vec!["label".to_string(), "word".to_string()];
         let m = Mapping {
-            site: 0,
+            site: Some(0),
             url: None,
             username: None,
             password: 1,
@@ -326,7 +385,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         };
         save_mapping(&v, &headers, &m).unwrap();
         let loaded = load_saved_mapping(&v, &headers).unwrap().unwrap();
-        assert_eq!(loaded.site, 0);
+        assert_eq!(loaded.site, Some(0));
         assert_eq!(loaded.password, 1);
     }
 
@@ -335,7 +394,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let (_t, v) = vault();
         let headers = vec!["label".to_string(), "word".to_string()];
         let m = Mapping {
-            site: 0,
+            site: Some(0),
             url: None,
             username: None,
             password: 1,
@@ -346,7 +405,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
 
         let content = "label,word\nFooSite,FooPass\n";
         let f = write_csv(content);
-        let r = parse_file(&v, f.path(), None).unwrap();
+        let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.entries[0].site, "FooSite");
         assert_eq!(r.entries[0].password, "FooPass");
