@@ -18,6 +18,8 @@ fn main() {
             get_account,
             reveal_password,
             copy_to_clipboard,
+            import_csv_dry_run,
+            import_csv_commit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

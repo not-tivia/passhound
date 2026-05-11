@@ -290,6 +290,235 @@ fn poisoned<T>(_: std::sync::PoisonError<T>) -> GuiError {
 }
 
 // ============================================================================
+// CSV import (Phase 4.2)
+// ============================================================================
+
+/// TS-friendly mirror of `passhound_core::importer::csv::Mapping`. Lives in the
+/// gui crate so the IPC contract doesn't expose core's internal type directly.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MappingArgs {
+    pub site: Option<usize>,
+    pub url: Option<usize>,
+    pub username: Option<usize>,
+    pub password: usize,
+    pub notes: Option<usize>,
+    pub created_at: Option<usize>,
+    #[serde(default)]
+    pub extras_into_notes: Vec<usize>,
+}
+
+impl From<MappingArgs> for passhound_core::importer::csv::Mapping {
+    fn from(m: MappingArgs) -> Self {
+        passhound_core::importer::csv::Mapping {
+            site: m.site,
+            url: m.url,
+            username: m.username,
+            password: m.password,
+            notes: m.notes,
+            created_at: m.created_at,
+            extras_into_notes: m.extras_into_notes,
+        }
+    }
+}
+
+impl From<passhound_core::importer::csv::Mapping> for MappingArgs {
+    fn from(m: passhound_core::importer::csv::Mapping) -> Self {
+        MappingArgs {
+            site: m.site,
+            url: m.url,
+            username: m.username,
+            password: m.password,
+            notes: m.notes,
+            created_at: m.created_at,
+            extras_into_notes: m.extras_into_notes,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct PreviewCounts {
+    pub new: usize,
+    pub duplicates: usize,
+    pub merges: usize,
+    pub errors: usize,
+}
+
+#[derive(Serialize)]
+pub struct SampleRow {
+    pub site: String,
+    pub username: Option<String>,
+    pub password_length: usize,
+    pub notes: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct PreviewResult {
+    pub headers: Vec<String>,
+    pub detected_mapping: MappingArgs,
+    pub effective_mapping: MappingArgs,
+    pub counts: PreviewCounts,
+    pub sample_rows: Vec<SampleRow>,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct CommitResult {
+    pub import_id: i64,
+    pub counts: PreviewCounts,
+}
+
+const SAMPLE_ROW_LIMIT: usize = 5;
+
+#[tauri::command]
+pub fn import_csv_dry_run(
+    state: State<'_, VaultState>,
+    path: String,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<PreviewResult, GuiError> {
+    import_csv_dry_run_inner(&state, &std::path::PathBuf::from(path), site_override, mapping)
+}
+
+pub fn import_csv_dry_run_inner(
+    state: &VaultState,
+    path: &std::path::Path,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<PreviewResult, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+
+    // Read headers ourselves so we can return them to the frontend even if
+    // auto_detect or parse_file would have failed.
+    let headers = read_csv_headers(path)?;
+    let detected = passhound_core::importer::csv::auto_detect(&headers)
+        .map(MappingArgs::from)
+        .ok_or_else(|| GuiError::InvalidInput(
+            "CSV has no recognizable password column".into(),
+        ))?;
+    let effective: passhound_core::importer::csv::Mapping = match &mapping {
+        Some(m) => m.clone().into(),
+        None => detected.clone().into(),
+    };
+
+    let parse = passhound_core::importer::csv::parse_file(
+        v,
+        path,
+        Some(effective.clone()),
+        site_override,
+    )?;
+
+    let preview = passhound_core::importer::pipeline::preview(v, parse.entries.clone())?;
+
+    let counts = PreviewCounts {
+        new: preview.new,
+        duplicates: preview.duplicates,
+        merges: preview.merges,
+        errors: parse.diagnostics.len(),
+    };
+
+    // Always-redacted sample rows.
+    let sample_rows: Vec<SampleRow> = parse
+        .entries
+        .iter()
+        .take(SAMPLE_ROW_LIMIT)
+        .map(|e| SampleRow {
+            site: e.site.clone(),
+            username: e.username.clone(),
+            password_length: e.password.chars().count(),
+            notes: e.notes.clone(),
+        })
+        .collect();
+
+    let diagnostics: Vec<String> = parse
+        .diagnostics
+        .iter()
+        .map(|d| format!("row {}: {}", d.row, d.reason))
+        .collect();
+
+    Ok(PreviewResult {
+        headers,
+        detected_mapping: detected,
+        effective_mapping: effective.into(),
+        counts,
+        sample_rows,
+        diagnostics,
+    })
+}
+
+#[tauri::command]
+pub fn import_csv_commit(
+    state: State<'_, VaultState>,
+    path: String,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<CommitResult, GuiError> {
+    import_csv_commit_inner(&state, &std::path::PathBuf::from(path), site_override, mapping)
+}
+
+pub fn import_csv_commit_inner(
+    state: &VaultState,
+    path: &std::path::Path,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<CommitResult, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+
+    let effective: passhound_core::importer::csv::Mapping = match mapping {
+        Some(m) => m.into(),
+        None => {
+            let headers = read_csv_headers(path)?;
+            passhound_core::importer::csv::auto_detect(&headers).ok_or_else(|| {
+                GuiError::InvalidInput("CSV has no recognizable password column".into())
+            })?
+        }
+    };
+
+    let parse = passhound_core::importer::csv::parse_file(
+        v,
+        path,
+        Some(effective),
+        site_override,
+    )?;
+    let preview = passhound_core::importer::pipeline::preview(v, parse.entries.clone())?;
+
+    let counts = PreviewCounts {
+        new: preview.new,
+        duplicates: preview.duplicates,
+        merges: preview.merges,
+        errors: parse.diagnostics.len(),
+    };
+
+    let import_id = passhound_core::importer::pipeline::commit(
+        v,
+        preview,
+        "csv",
+        Some(path),
+    )?;
+
+    Ok(CommitResult {
+        import_id: import_id.0,
+        counts,
+    })
+}
+
+fn read_csv_headers(path: &std::path::Path) -> Result<Vec<String>, GuiError> {
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .flexible(true)
+        .from_path(path)
+        .map_err(|e| GuiError::InvalidInput(format!("open csv: {e}")))?;
+    let headers = rdr
+        .headers()
+        .map_err(|e| GuiError::InvalidInput(format!("read headers: {e}")))?
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    Ok(headers)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -469,5 +698,60 @@ mod tests {
         vault_lock_inner(&state).unwrap();
         let err = reveal_password_inner(&state, history_id).unwrap_err();
         assert!(matches!(err, GuiError::Locked), "expected Locked, got {err:?}");
+    }
+
+    #[test]
+    fn import_csv_dry_run_returns_redacted_preview() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+
+        // Write a CSV file in a separate tempdir.
+        let csv_tmp = TempDir::new().unwrap();
+        let csv_path = csv_tmp.path().join("input.csv");
+        std::fs::write(
+            &csv_path,
+            "name,login,password,note\nReddit,chris,SecretPw,first row\n",
+        )
+        .unwrap();
+
+        let preview = import_csv_dry_run_inner(&state, &csv_path, None, None).unwrap();
+        assert_eq!(preview.headers, vec!["name", "login", "password", "note"]);
+        assert_eq!(preview.counts.new, 1);
+        assert_eq!(preview.counts.duplicates, 0);
+        assert_eq!(preview.sample_rows.len(), 1);
+        assert_eq!(preview.sample_rows[0].site, "Reddit");
+        assert_eq!(preview.sample_rows[0].password_length, "SecretPw".len());
+        // Password value MUST NOT be in any serialized field.
+        let serialized = serde_json::to_string(&preview).unwrap();
+        assert!(
+            !serialized.contains("SecretPw"),
+            "password leaked in preview JSON: {serialized}"
+        );
+    }
+
+    #[test]
+    fn import_csv_commit_writes_entries() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+
+        let csv_tmp = TempDir::new().unwrap();
+        let csv_path = csv_tmp.path().join("input.csv");
+        std::fs::write(
+            &csv_path,
+            "name,login,password,displayname,total level\n\
+             RuneScape,chris,Fluffy!2014,Bob,99\n",
+        )
+        .unwrap();
+
+        let r = import_csv_commit_inner(&state, &csv_path, None, None).unwrap();
+        assert_eq!(r.counts.new, 1);
+        assert!(r.import_id > 0);
+
+        // Verify the row is in the vault now.
+        let list = list_accounts_inner(&state, None).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].site_name, "RuneScape");
     }
 }
