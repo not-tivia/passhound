@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default capability for the main window: core permissions + clipboard write.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "clipboard-manager:allow-write-text"
+  ]
+}
