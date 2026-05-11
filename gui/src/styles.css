@@ -41,3 +41,98 @@ input {
   font-family: inherit;
   font-size: inherit;
 }
+
+/* ============================================================================
+   Lock screen
+   ============================================================================ */
+
+.lock-shell {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-0);
+}
+
+.lock-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 28px 32px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lock-icon {
+  font-size: 28px;
+  text-align: center;
+}
+
+.lock-title {
+  color: var(--text-0);
+  font-weight: 600;
+  text-align: center;
+  font-size: 14px;
+}
+
+.lock-subtitle {
+  color: var(--text-3);
+  text-align: center;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.lock-input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.lock-input:focus {
+  border-color: var(--border-hover);
+}
+
+.lock-button {
+  background: var(--border);
+  border: none;
+  color: var(--text-0);
+  padding: 9px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.lock-button:hover:not(:disabled) {
+  background: var(--border-hover);
+}
+
+.lock-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lock-warning {
+  background: var(--bg-2);
+  border: 1px solid #3a2a1a;
+  color: var(--accent);
+  padding: 7px 10px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.lock-error {
+  color: var(--error);
+  font-size: 11px;
+  text-align: center;
+}
+
+.lock-path {
+  color: var(--text-3);
+  font-size: 10px;
+  text-align: center;
+  margin-top: 6px;
+}
