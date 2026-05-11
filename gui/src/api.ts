@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AccountSummary, AccountDetail, GuiError } from "./types";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import type {
+  AccountSummary,
+  AccountDetail,
+  GuiError,
+  Mapping,
+  PreviewResult,
+  CommitResult,
+} from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
 // rejection shape (always GuiError, never raw string).
@@ -25,4 +33,38 @@ export const api = {
   revealPassword: (historyId: number) =>
     call<string>("reveal_password", { historyId }),
   copyToClipboard: (text: string) => call<void>("copy_to_clipboard", { text }),
+
+  // Phase 4.2 — CSV import
+  importCsvDryRun: (
+    path: string,
+    siteOverride: string | null,
+    mapping: Mapping | null,
+  ) =>
+    call<PreviewResult>("import_csv_dry_run", {
+      path,
+      siteOverride,
+      mapping,
+    }),
+  importCsvCommit: (
+    path: string,
+    siteOverride: string | null,
+    mapping: Mapping | null,
+  ) =>
+    call<CommitResult>("import_csv_commit", {
+      path,
+      siteOverride,
+      mapping,
+    }),
+
+  // Native file picker via @tauri-apps/plugin-dialog. Returns null if user
+  // cancels.
+  pickCsvFile: async (): Promise<string | null> => {
+    const result = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "CSV", extensions: ["csv", "CSV"] }],
+    });
+    if (typeof result === "string") return result;
+    return null;
+  },
 };

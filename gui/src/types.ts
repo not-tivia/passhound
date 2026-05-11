@@ -39,3 +39,43 @@ export interface GuiError {
   kind: GuiErrorKind;
   message?: string;
 }
+
+// Phase 4.2 — CSV import
+
+export interface Mapping {
+  site: number | null;
+  url: number | null;
+  username: number | null;
+  password: number;
+  notes: number | null;
+  created_at: number | null;
+  extras_into_notes: number[];
+}
+
+export interface PreviewCounts {
+  new: number;
+  duplicates: number;
+  merges: number;
+  errors: number;
+}
+
+export interface SampleRow {
+  site: string;
+  username: string | null;
+  password_length: number;
+  notes: string | null;
+}
+
+export interface PreviewResult {
+  headers: string[];
+  detected_mapping: Mapping;
+  effective_mapping: Mapping;
+  counts: PreviewCounts;
+  sample_rows: SampleRow[];
+  diagnostics: string[];
+}
+
+export interface CommitResult {
+  import_id: number;
+  counts: PreviewCounts;
+}
