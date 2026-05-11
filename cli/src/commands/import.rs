@@ -238,6 +238,7 @@ fn parse_mapping_arg(s: &str, path: &Path) -> Result<Mapping> {
         password: password.ok_or_else(|| anyhow::anyhow!("--mapping must include password=..."))?,
         notes,
         created_at,
+        extras_into_notes: vec![],
     })
 }
 
@@ -290,6 +291,7 @@ fn interactive_mapping(headers: &[String]) -> Result<Mapping> {
         password,
         notes,
         created_at,
+        extras_into_notes: vec![],
     })
 }
 

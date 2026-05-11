@@ -26,6 +26,12 @@ pub struct Mapping {
     pub password: usize,
     pub notes: Option<usize>,
     pub created_at: Option<usize>,
+    /// Additional column indices to merge into each row's notes field as
+    /// labeled lines `"<header>: <value>"`. Empty values skipped per-row.
+    /// `#[serde(default)]` keeps backward-compat with mappings serialized
+    /// before this phase (older shapes deserialize with an empty Vec).
+    #[serde(default)]
+    pub extras_into_notes: Vec<usize>,
 }
 
 const SITE_SYNONYMS: &[&str] = &["name", "site", "site_name", "website", "title"];
@@ -49,15 +55,35 @@ fn find_index(headers: &[String], synonyms: &[&str]) -> Option<usize> {
 /// `password` can't be located (the only strictly required column). The site
 /// column is optional in the mapping — `parse_file` enforces that either
 /// `Mapping.site` is set OR a `site_override` argument is supplied.
+///
+/// Every header that does NOT match a standard synonym (site/url/username/
+/// password/notes/created_at) goes into `extras_into_notes` so its per-row
+/// value is preserved as a labeled line in the notes field. Nothing is
+/// silently dropped.
 pub fn auto_detect(headers: &[String]) -> Option<Mapping> {
     let password = find_index(headers, PASSWORD_SYNONYMS)?;
+    let site = find_index(headers, SITE_SYNONYMS);
+    let url = find_index(headers, URL_SYNONYMS);
+    let username = find_index(headers, USERNAME_SYNONYMS);
+    let notes = find_index(headers, NOTES_SYNONYMS);
+    let created_at = find_index(headers, CREATED_AT_SYNONYMS);
+
+    let mapped: std::collections::HashSet<usize> =
+        [site, url, username, Some(password), notes, created_at]
+            .into_iter()
+            .flatten()
+            .collect();
+    let extras_into_notes: Vec<usize> =
+        (0..headers.len()).filter(|i| !mapped.contains(i)).collect();
+
     Some(Mapping {
-        site: find_index(headers, SITE_SYNONYMS),
-        url: find_index(headers, URL_SYNONYMS),
-        username: find_index(headers, USERNAME_SYNONYMS),
+        site,
+        url,
+        username,
         password,
-        notes: find_index(headers, NOTES_SYNONYMS),
-        created_at: find_index(headers, CREATED_AT_SYNONYMS),
+        notes,
+        created_at,
+        extras_into_notes,
     })
 }
 
@@ -221,11 +247,26 @@ pub fn parse_file(
             .and_then(|i| rec.get(i).map(|s| s.trim()))
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
-        let notes = map
-            .notes
-            .and_then(|i| rec.get(i).map(|s| s.trim()))
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
+        // Notes assembly: start with the mapped notes column (if any), then
+        // append labeled lines for each extras index whose row value is
+        // non-empty. Multiple parts joined by '\n'.
+        let mut notes_parts: Vec<String> = Vec::new();
+        if let Some(idx) = map.notes {
+            if let Some(s) = rec.get(idx).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                notes_parts.push(s.to_string());
+            }
+        }
+        for idx in &map.extras_into_notes {
+            if let Some(value) = rec.get(*idx).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                let header = headers.get(*idx).map(|s| s.as_str()).unwrap_or("extra");
+                notes_parts.push(format!("{header}: {value}"));
+            }
+        }
+        let notes = if notes_parts.is_empty() {
+            None
+        } else {
+            Some(notes_parts.join("\n"))
+        };
         let created_at = map
             .created_at
             .and_then(|i| rec.get(i).map(|s| s.trim()))
@@ -348,6 +389,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
             password: 1,
             notes: None,
             created_at: None,
+            extras_into_notes: vec![],
         };
         let r = parse_file(&v, f.path(), Some(m), None).unwrap();
         assert_eq!(r.entries.len(), 1);
@@ -382,6 +424,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
             password: 1,
             notes: None,
             created_at: None,
+            extras_into_notes: vec![],
         };
         save_mapping(&v, &headers, &m).unwrap();
         let loaded = load_saved_mapping(&v, &headers).unwrap().unwrap();
@@ -400,6 +443,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
             password: 1,
             notes: None,
             created_at: None,
+            extras_into_notes: vec![],
         };
         save_mapping(&v, &headers, &m).unwrap();
 
@@ -409,5 +453,69 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.entries[0].site, "FooSite");
         assert_eq!(r.entries[0].password, "FooPass");
+    }
+
+    #[test]
+    fn extras_into_notes_appends_labeled_lines() {
+        let (_t, v) = vault();
+        let content = "name,login,password,displayname,total level\n\
+            RuneScape,chris,Fluffy!2014,Bob,99\n";
+        let f = write_csv(content);
+        let r = parse_file(&v, f.path(), None, None).unwrap();
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(
+            r.entries[0].notes.as_deref(),
+            Some("displayname: Bob\ntotal level: 99")
+        );
+    }
+
+    #[test]
+    fn extras_into_notes_skips_empty_values_per_row() {
+        let (_t, v) = vault();
+        let content = "name,login,password,displayname,total level\n\
+            RuneScape,chris,Fluffy!2014,Bob,99\n\
+            RuneScape,chris2,Fluffy!2015,,\n";
+        let f = write_csv(content);
+        let r = parse_file(&v, f.path(), None, None).unwrap();
+        assert_eq!(r.entries.len(), 2);
+        assert_eq!(
+            r.entries[0].notes.as_deref(),
+            Some("displayname: Bob\ntotal level: 99")
+        );
+        // Row 2 has empty extras → no notes generated.
+        assert_eq!(r.entries[1].notes, None);
+    }
+
+    #[test]
+    fn extras_into_notes_combines_with_explicit_notes_column() {
+        let (_t, v) = vault();
+        // The "notes" column maps to the notes field; "displayname" and
+        // "total level" are extras. Notes ordered: existing notes column
+        // first, then labeled extras.
+        let content = "name,login,password,notes,displayname,total level\n\
+            RuneScape,chris,Fluffy!2014,maxed combat,Bob,99\n";
+        let f = write_csv(content);
+        let r = parse_file(&v, f.path(), None, None).unwrap();
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(
+            r.entries[0].notes.as_deref(),
+            Some("maxed combat\ndisplayname: Bob\ntotal level: 99")
+        );
+    }
+
+    #[test]
+    fn auto_detect_populates_extras_with_unmapped_columns() {
+        let headers: Vec<String> = vec![
+            "name".into(),
+            "login".into(),
+            "password".into(),
+            "displayname".into(),
+            "total level".into(),
+        ];
+        let m = auto_detect(&headers).expect("password is present");
+        assert_eq!(m.site, Some(0));
+        assert_eq!(m.username, Some(1));
+        assert_eq!(m.password, 2);
+        assert_eq!(m.extras_into_notes, vec![3, 4]);
     }
 }
