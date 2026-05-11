@@ -7,6 +7,7 @@ use passhound_gui::state::VaultState;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(VaultState::new())
         .invoke_handler(tauri::generate_handler![
             vault_exists,
