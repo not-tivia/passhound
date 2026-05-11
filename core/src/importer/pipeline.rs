@@ -3,7 +3,7 @@
 use super::{ImportEntry, ParseResult};
 use crate::error::{Error, Result};
 use crate::repo::accounts::{self, NewAccount};
-use crate::repo::passwords::{self, Confidence, NewPassword};
+use crate::repo::passwords;
 use crate::repo::sites::{self, NewSite};
 use crate::vault::Vault;
 use chrono::Utc;

@@ -3,7 +3,6 @@
 //! Pipeline: pool::build -> stats::compute -> generators -> transformers
 //! -> ranking::score -> score modifiers -> sort/truncate.
 
-use crate::error::Result;
 use crate::vault::Vault;
 use chrono::{DateTime, NaiveDate, Utc};
 use std::collections::HashMap;

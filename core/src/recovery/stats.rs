@@ -93,7 +93,7 @@ pub fn count_trailing_digits(s: &str) -> u8 {
 pub fn trailing_year(s: &str) -> Option<u16> {
     // Zero-allocation: work on bytes (years are ASCII digits).
     let b = s.as_bytes();
-    let mut end = b.len();
+    let end = b.len();
     // Find start of trailing digit run.
     let mut start = end;
     while start > 0 && b[start - 1].is_ascii_digit() {
