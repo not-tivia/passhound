@@ -9,15 +9,16 @@ import {
   type ColumnId,
   type PrimaryIdentity,
 } from "../preferences";
+import TagChip from "./TagChip";
 
 interface AccountsTableProps {
   selectedId: number | null;
   onSelect: (id: number) => void;
   onLockedError: () => void;
-  refreshKey?: number;
-  filterTagIds?: number[];
-  selectedIds?: Set<number>;
-  onSelectedIdsChange?: (ids: Set<number>) => void;
+  refreshKey: number;
+  filterTagIds: number[];
+  selectedIds: Set<number>;
+  onSelectedIdsChange: (ids: Set<number>) => void;
 }
 
 interface ColumnDef {
@@ -34,7 +35,19 @@ function renderUserDisplayCell(
   const secondaryText = primary === "username" ? a.display_name : a.username;
   return (
     <>
-      <div>{primaryText ?? <span className="muted">—</span>}</div>
+      <div>
+        {primaryText ?? <span className="muted">—</span>}
+        {a.tags && a.tags.length > 0 && (
+          <span className="account-row__tags">
+            {a.tags.slice(0, 3).map((t) => (
+              <TagChip key={t.id} tag={t} />
+            ))}
+            {a.tags.length > 3 && (
+              <span className="tag-chip tag-chip--overflow">+{a.tags.length - 3}</span>
+            )}
+          </span>
+        )}
+      </div>
       {secondaryText && (
         <div className="accounts-table__secondary">{secondaryText}</div>
       )}
@@ -60,10 +73,10 @@ export default function AccountsTable({
   selectedId,
   onSelect,
   onLockedError,
-  refreshKey: _refreshKey = 0,
-  filterTagIds: _filterTagIds = [],
-  selectedIds: _selectedIds = new Set<number>(),
-  onSelectedIdsChange: _onSelectedIdsChange = () => {},
+  refreshKey,
+  filterTagIds,
+  selectedIds,
+  onSelectedIdsChange,
 }: AccountsTableProps) {
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [filter, setFilter] = useState("");
@@ -94,11 +107,11 @@ export default function AccountsTable({
     },
   };
 
-  const load = async (q: string) => {
+  const load = async (q: string, tagIds: number[]) => {
     setLoading(true);
     setError(null);
     try {
-      const list = await api.listAccounts(q || undefined);
+      const list = await api.listAccounts(q || undefined, tagIds.length > 0 ? tagIds : undefined);
       setAccounts(list);
     } catch (e) {
       const err = e as GuiError;
@@ -113,15 +126,17 @@ export default function AccountsTable({
   };
 
   useEffect(() => {
-    load("");
-  }, []);
+    load(filter, filterTagIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey, filterTagIds]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => load(filter), 250);
+    debounceRef.current = setTimeout(() => load(filter, filterTagIds), 250);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const togglePrimary = () => {
@@ -140,6 +155,29 @@ export default function AccountsTable({
     setDragOverColumn(null);
   };
 
+  // Checkbox column helpers
+  const visibleIds = accounts.map((a) => a.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someSelected = visibleIds.some((id) => selectedIds.has(id)) && !allSelected;
+
+  const toggleAll = () => {
+    if (allSelected) {
+      const next = new Set(selectedIds);
+      visibleIds.forEach((id) => next.delete(id));
+      onSelectedIdsChange(next);
+    } else {
+      const next = new Set(selectedIds);
+      visibleIds.forEach((id) => next.add(id));
+      onSelectedIdsChange(next);
+    }
+  };
+
+  const toggleOne = (id: number) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onSelectedIdsChange(next);
+  };
+
   return (
     <div className="accounts-table">
       <div className="accounts-table__searchbar">
@@ -154,7 +192,7 @@ export default function AccountsTable({
           title={`Primary: ${primary === "username" ? "username" : "display name"} (click to swap)`}
           onClick={togglePrimary}
         >
-          ⇅
+          &#x21C5;
         </button>
       </div>
       <div className="accounts-table__filters">
@@ -171,8 +209,24 @@ export default function AccountsTable({
       {!loading && !error && (
         <div className="accounts-table__body">
           <table>
+            <colgroup>
+              <col style={{ width: "28px" }} />
+              {columnOrder.map((id) => (
+                <col key={id} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
+                {/* Checkbox column — fixed, non-draggable */}
+                <th className="accounts-table__check-col">
+                  <input
+                    type="checkbox"
+                    ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    aria-label="Select all visible accounts"
+                  />
+                </th>
                 {columnOrder.map((id) => {
                   const col = COLUMNS[id];
                   const classes = ["accounts-table__th"];
@@ -212,6 +266,14 @@ export default function AccountsTable({
                   className={a.id === selectedId ? "accounts-table__row--selected" : ""}
                   onClick={() => onSelect(a.id)}
                 >
+                  {/* Checkbox cell — fixed, non-draggable */}
+                  <td className="accounts-table__check-col" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(a.id)}
+                      onChange={() => toggleOne(a.id)}
+                    />
+                  </td>
                   {columnOrder.map((id) => (
                     <td key={id}>{COLUMNS[id].render(a)}</td>
                   ))}
@@ -219,7 +281,7 @@ export default function AccountsTable({
               ))}
               {accounts.length === 0 && (
                 <tr>
-                  <td colSpan={columnOrder.length} className="accounts-table__empty">
+                  <td colSpan={columnOrder.length + 1} className="accounts-table__empty">
                     {filter ? "No matches" : "No accounts yet — import via CLI or 📥"}
                   </td>
                 </tr>

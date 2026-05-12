@@ -1129,3 +1129,23 @@ select option {
 
 .vault-accounts { display: flex; flex-direction: column; overflow: hidden; position: relative; }
 .vault-detail { overflow-y: auto; border-left: 1px solid #2a2a32; }
+
+/* Task 7 — checkbox column + inline tag chips */
+.accounts-table__check-col {
+  width: 28px;
+  padding-left: 6px;
+  padding-right: 0;
+}
+.accounts-table__check-col input[type="checkbox"] {
+  cursor: pointer;
+}
+.account-row__tags {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 6px;
+  flex-wrap: wrap;
+}
+.tag-chip--overflow {
+  background: transparent;
+  border-style: dashed;
+}
