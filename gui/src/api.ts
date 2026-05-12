@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   AccountSummary,
   AccountDetail,
+  AttachmentRead,
+  AttachmentSummary,
   GuiError,
   Mapping,
   PreviewResult,
@@ -64,6 +66,33 @@ export const api = {
       directory: false,
       filters: [{ name: "CSV", extensions: ["csv", "CSV"] }],
     });
+    if (typeof result === "string") return result;
+    return null;
+  },
+
+  // Phase 4.4 — Attachments
+  listAttachments: (accountId: number) =>
+    call<AttachmentSummary[]>("list_attachments", { accountId }),
+  attachFile: (
+    accountId: number,
+    filename: string,
+    mimeType: string,
+    bytesBase64: string,
+  ) =>
+    call<AttachmentSummary>("attach_file", {
+      accountId,
+      filename,
+      mimeType,
+      bytesBase64,
+    }),
+  readAttachment: (attachmentId: number) =>
+    call<AttachmentRead>("read_attachment", { attachmentId }),
+  deleteAttachment: (attachmentId: number) =>
+    call<void>("delete_attachment", { attachmentId }),
+
+  // Native save dialog via @tauri-apps/plugin-dialog. Returns null if user cancels.
+  saveFileDialog: async (defaultName: string): Promise<string | null> => {
+    const result = await saveDialog({ defaultPath: defaultName });
     if (typeof result === "string") return result;
     return null;
   },

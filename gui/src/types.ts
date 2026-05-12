@@ -83,3 +83,22 @@ export interface CommitResult {
   import_id: number;
   counts: PreviewCounts;
 }
+
+// Phase 4.4 — Attachments
+
+export interface AttachmentSummary {
+  id: number;
+  account_id: number;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface AttachmentRead {
+  id: number;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  bytes_base64: string;
+}
