@@ -1149,3 +1149,94 @@ select option {
   background: transparent;
   border-style: dashed;
 }
+
+/* ============================================================================
+   BulkActionBar + DeleteAccountsConfirm (Task 8)
+   ============================================================================ */
+
+.bulk-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #1a1a22;
+  border-top: 1px solid #3a3a44;
+  font-size: 11px;
+  z-index: 10;
+}
+.bulk-bar__count { font-weight: bold; margin-right: 8px; }
+.bulk-bar button {
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-1, #d0d0d8);
+  padding: 3px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.bulk-bar button:hover:not(:disabled) {
+  background: #2a2a32;
+  color: var(--text-0);
+}
+.bulk-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+.bulk-bar__danger { color: var(--error) !important; border-color: #5a2a2a !important; }
+.bulk-bar__danger:hover:not(:disabled) { background: #2a1a1a !important; }
+.bulk-bar__clear { margin-left: auto; }
+.bulk-bar__popover {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: #1a1a22;
+  border: 1px solid #3a3a44;
+  border-radius: 6px;
+  padding: 20px;
+  min-width: 360px;
+  max-width: 520px;
+}
+.modal h2 { margin: 0 0 12px 0; font-size: 14px; }
+.modal p { font-size: 12px; line-height: 1.5; color: var(--text-1); margin: 4px 0; }
+.modal__warn { color: var(--error); }
+.modal__input {
+  width: 100%;
+  background: #14141a;
+  border: 1px solid #3a3a44;
+  padding: 6px 10px;
+  color: var(--text-0);
+  font-family: inherit;
+  margin-top: 6px;
+}
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.modal__actions button {
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-0);
+  padding: 6px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+}
+.modal__btn--danger {
+  border-color: #5a2a2a !important;
+  color: var(--error) !important;
+}
+.modal__btn--danger:disabled { opacity: 0.4; cursor: not-allowed; }

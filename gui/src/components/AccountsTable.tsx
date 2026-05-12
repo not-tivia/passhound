@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api } from "../api";
-import type { AccountSummary, GuiError } from "../types";
+import { useState, type ReactNode } from "react";
+import type { AccountSummary } from "../types";
 import {
   getVaultListColumnOrder,
   getVaultListPrimary,
@@ -12,11 +11,12 @@ import {
 import TagChip from "./TagChip";
 
 interface AccountsTableProps {
+  accounts: AccountSummary[];
+  search: string;
+  onSearchChange: (s: string) => void;
   selectedId: number | null;
   onSelect: (id: number) => void;
   onLockedError: () => void;
-  refreshKey: number;
-  filterTagIds: number[];
   selectedIds: Set<number>;
   onSelectedIdsChange: (ids: Set<number>) => void;
 }
@@ -36,7 +36,7 @@ function renderUserDisplayCell(
   return (
     <>
       <div>
-        {primaryText ?? <span className="muted">—</span>}
+        {primaryText ?? <span className="muted">&#x2014;</span>}
         {a.tags && a.tags.length > 0 && (
           <span className="account-row__tags">
             {a.tags.slice(0, 3).map((t) => (
@@ -70,23 +70,19 @@ function moveColumn(order: ColumnId[], from: ColumnId, to: ColumnId): ColumnId[]
 }
 
 export default function AccountsTable({
+  accounts,
+  search,
+  onSearchChange,
   selectedId,
   onSelect,
-  onLockedError,
-  refreshKey,
-  filterTagIds,
+  onLockedError: _onLockedError,
   selectedIds,
   onSelectedIdsChange,
 }: AccountsTableProps) {
-  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [filter, setFilter] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [primary, setPrimary] = useState<PrimaryIdentity>(getVaultListPrimary());
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(getVaultListColumnOrder());
   const [draggedColumn, setDraggedColumn] = useState<ColumnId | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<ColumnId | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const COLUMNS: Record<ColumnId, ColumnDef> = {
     site: {
@@ -96,48 +92,16 @@ export default function AccountsTable({
     },
     user_display: {
       id: "user_display",
-      label: "User · Display",
+      label: "User \xb7 Display",
       render: (a) => renderUserDisplayCell(a, primary),
     },
     last: {
       id: "last",
       label: "Last",
       render: (a) =>
-        a.last_changed ? a.last_changed.slice(0, 7) : <span className="muted">—</span>,
+        a.last_changed ? a.last_changed.slice(0, 7) : <span className="muted">&#x2014;</span>,
     },
   };
-
-  const load = async (q: string, tagIds: number[]) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const list = await api.listAccounts(q || undefined, tagIds.length > 0 ? tagIds : undefined);
-      setAccounts(list);
-    } catch (e) {
-      const err = e as GuiError;
-      if (err.kind === "Locked") {
-        onLockedError();
-        return;
-      }
-      setError(err.message ?? err.kind);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load(filter, filterTagIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, filterTagIds]);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => load(filter, filterTagIds), 250);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
 
   const togglePrimary = () => {
     const next: PrimaryIdentity = primary === "username" ? "display_name" : "username";
@@ -184,8 +148,8 @@ export default function AccountsTable({
         <input
           className="accounts-table__search"
           placeholder={`Search ${accounts.length} account${accounts.length === 1 ? "" : "s"}...`}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
         />
         <button
           className="accounts-table__primary-toggle"
@@ -204,92 +168,88 @@ export default function AccountsTable({
           Eras
         </button>
       </div>
-      {loading && <div className="accounts-table__status">Loading...</div>}
-      {error && <div className="accounts-table__status accounts-table__status--error">{error}</div>}
-      {!loading && !error && (
-        <div className="accounts-table__body">
-          <table>
-            <colgroup>
-              <col style={{ width: "28px" }} />
-              {columnOrder.map((id) => (
-                <col key={id} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {/* Checkbox column — fixed, non-draggable */}
-                <th className="accounts-table__check-col">
+      <div className="accounts-table__body">
+        <table>
+          <colgroup>
+            <col style={{ width: "28px" }} />
+            {columnOrder.map((id) => (
+              <col key={id} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              {/* Checkbox column — fixed, non-draggable */}
+              <th className="accounts-table__check-col">
+                <input
+                  type="checkbox"
+                  ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  aria-label="Select all visible accounts"
+                />
+              </th>
+              {columnOrder.map((id) => {
+                const col = COLUMNS[id];
+                const classes = ["accounts-table__th"];
+                if (draggedColumn === id) classes.push("accounts-table__th--dragging");
+                if (dragOverColumn === id && draggedColumn !== id)
+                  classes.push("accounts-table__th--drag-over");
+                return (
+                  <th
+                    key={id}
+                    draggable
+                    onDragStart={() => setDraggedColumn(id)}
+                    onDragEnter={() => setDragOverColumn(id)}
+                    onDragLeave={() => {
+                      // Only clear if leaving this specific column
+                      if (dragOverColumn === id) setDragOverColumn(null);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault(); // Required to allow drop
+                    }}
+                    onDrop={() => handleColumnDrop(id)}
+                    onDragEnd={() => {
+                      setDraggedColumn(null);
+                      setDragOverColumn(null);
+                    }}
+                    className={classes.join(" ")}
+                  >
+                    {col.label}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((a) => (
+              <tr
+                key={a.id}
+                className={a.id === selectedId ? "accounts-table__row--selected" : ""}
+                onClick={() => onSelect(a.id)}
+              >
+                {/* Checkbox cell — fixed, non-draggable */}
+                <td className="accounts-table__check-col" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
-                    ref={(el) => { if (el) el.indeterminate = someSelected; }}
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    aria-label="Select all visible accounts"
+                    checked={selectedIds.has(a.id)}
+                    onChange={() => toggleOne(a.id)}
                   />
-                </th>
-                {columnOrder.map((id) => {
-                  const col = COLUMNS[id];
-                  const classes = ["accounts-table__th"];
-                  if (draggedColumn === id) classes.push("accounts-table__th--dragging");
-                  if (dragOverColumn === id && draggedColumn !== id)
-                    classes.push("accounts-table__th--drag-over");
-                  return (
-                    <th
-                      key={id}
-                      draggable
-                      onDragStart={() => setDraggedColumn(id)}
-                      onDragEnter={() => setDragOverColumn(id)}
-                      onDragLeave={() => {
-                        // Only clear if leaving this specific column
-                        if (dragOverColumn === id) setDragOverColumn(null);
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault(); // Required to allow drop
-                      }}
-                      onDrop={() => handleColumnDrop(id)}
-                      onDragEnd={() => {
-                        setDraggedColumn(null);
-                        setDragOverColumn(null);
-                      }}
-                      className={classes.join(" ")}
-                    >
-                      {col.label}
-                    </th>
-                  );
-                })}
+                </td>
+                {columnOrder.map((id) => (
+                  <td key={id}>{COLUMNS[id].render(a)}</td>
+                ))}
               </tr>
-            </thead>
-            <tbody>
-              {accounts.map((a) => (
-                <tr
-                  key={a.id}
-                  className={a.id === selectedId ? "accounts-table__row--selected" : ""}
-                  onClick={() => onSelect(a.id)}
-                >
-                  {/* Checkbox cell — fixed, non-draggable */}
-                  <td className="accounts-table__check-col" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(a.id)}
-                      onChange={() => toggleOne(a.id)}
-                    />
-                  </td>
-                  {columnOrder.map((id) => (
-                    <td key={id}>{COLUMNS[id].render(a)}</td>
-                  ))}
-                </tr>
-              ))}
-              {accounts.length === 0 && (
-                <tr>
-                  <td colSpan={columnOrder.length + 1} className="accounts-table__empty">
-                    {filter ? "No matches" : "No accounts yet — import via CLI or 📥"}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+            {accounts.length === 0 && (
+              <tr>
+                <td colSpan={columnOrder.length + 1} className="accounts-table__empty">
+                  {search ? "No matches" : "No accounts yet — import via CLI or 📥"}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
