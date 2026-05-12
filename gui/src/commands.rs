@@ -103,6 +103,7 @@ pub struct AccountSummary {
     pub id: i64,
     pub site_name: String,
     pub username: Option<String>,
+    pub display_name: Option<String>,
     pub last_changed: Option<String>,
     pub category: Option<String>,
 }
@@ -135,7 +136,7 @@ pub fn list_accounts_inner(
         .map(|s| s.to_lowercase())
         .filter(|s| !s.is_empty());
     let sql = "
-        SELECT a.id, s.name, a.username, s.category,
+        SELECT a.id, s.name, a.username, a.display_name, s.category,
                (SELECT MAX(ph.created_at) FROM password_history ph WHERE ph.account_id = a.id) AS last_changed
         FROM accounts a
         JOIN sites s ON s.id = a.site_id
@@ -149,16 +150,18 @@ pub fn list_accounts_inner(
             r.get::<_, Option<String>>(2)?,
             r.get::<_, Option<String>>(3)?,
             r.get::<_, Option<String>>(4)?,
+            r.get::<_, Option<String>>(5)?,
         ))
     })?;
     let mut out: Vec<AccountSummary> = Vec::new();
     for row in rows {
-        let (id, site_name, username, category, last_changed) = row?;
+        let (id, site_name, username, display_name, category, last_changed) = row?;
         if let Some(needle) = &needle {
             let hay = format!(
-                "{} {} {}",
+                "{} {} {} {}",
                 site_name.to_lowercase(),
                 username.as_deref().unwrap_or("").to_lowercase(),
+                display_name.as_deref().unwrap_or("").to_lowercase(),
                 category.as_deref().unwrap_or("").to_lowercase()
             );
             if !hay.contains(needle) {
@@ -169,6 +172,7 @@ pub fn list_accounts_inner(
             id,
             site_name,
             username,
+            display_name,
             last_changed,
             category,
         });
@@ -184,6 +188,7 @@ pub struct AccountDetail {
     pub site_category: Option<String>,
     pub site_abbreviations: Vec<String>,
     pub username: Option<String>,
+    pub display_name: Option<String>,
     pub history: Vec<HistoryEntry>,
 }
 
@@ -234,6 +239,7 @@ pub fn get_account_inner(state: &VaultState, id: i64) -> Result<AccountDetail, G
         site_category: site.category,
         site_abbreviations: site.abbreviations,
         username: acct.username,
+        display_name: acct.display_name,
         history,
     })
 }
@@ -351,6 +357,7 @@ pub struct PreviewCounts {
 pub struct SampleRow {
     pub site: String,
     pub username: Option<String>,
+    pub display_name: Option<String>,
     pub password_length: usize,
     pub notes: Option<String>,
 }
@@ -429,6 +436,7 @@ pub fn import_csv_dry_run_inner(
         .map(|e| SampleRow {
             site: e.site.clone(),
             username: e.username.clone(),
+            display_name: e.display_name.clone(),
             password_length: e.password.chars().count(),
             notes: e.notes.clone(),
         })
@@ -576,6 +584,7 @@ mod tests {
             let a = accounts::create(v, accounts::NewAccount {
                 site_id: s.id,
                 username: Some("chris".into()),
+                display_name: Some("MaxedNoob".into()),
                 ..Default::default()
             }).unwrap();
             passwords::insert(v, passwords::NewPassword {
@@ -593,6 +602,7 @@ mod tests {
         assert_eq!(list[0].username.as_deref(), Some("chris"));
         assert_eq!(list[0].category.as_deref(), Some("Social"));
         assert!(list[0].last_changed.is_some());
+        assert_eq!(list[0].display_name.as_deref(), Some("MaxedNoob"));
         // Filter
         let filtered = list_accounts_inner(&state, Some("redd")).unwrap();
         assert_eq!(filtered.len(), 1);

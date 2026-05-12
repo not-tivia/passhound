@@ -56,7 +56,7 @@ fn phase1_vault_auto_upgrades_on_open() {
     let mut v = Vault::open(&path).unwrap();
     v.unlock(b"hunter2").unwrap();
 
-    // Confirm schema_version is now present and equals 4.
+    // Confirm schema_version is now present and equals 5.
     let val: Vec<u8> = v
         .conn()
         .query_row(
@@ -65,7 +65,7 @@ fn phase1_vault_auto_upgrades_on_open() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(val.as_slice(), b"4");
+    assert_eq!(val.as_slice(), b"5");
 
     // Confirm the new column exists.
     let mut stmt = v.conn().prepare("PRAGMA table_info(password_history)").unwrap();
