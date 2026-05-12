@@ -3,13 +3,14 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 const INITIAL: &str = include_str!("001_initial.sql");
 
-pub const LATEST_VERSION: i32 = 6;
+pub const LATEST_VERSION: i32 = 7;
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 const MIGRATION_002: &str = include_str!("002_source_provenance.sql");
 const MIGRATION_003: &str = include_str!("003_base_word_manual_override.sql");
 const MIGRATION_004: &str = include_str!("004_base_word_casing.sql");
 const MIGRATION_005: &str = include_str!("005_account_display_name.sql");
 const MIGRATION_006: &str = include_str!("006_attachments.sql");
+const MIGRATION_007: &str = include_str!("007_tags.sql");
 
 /// Apply the initial schema to a fresh DB. NOT idempotent — calling on an
 /// already-initialized DB fails with a SQLite "table already exists" error,
@@ -65,6 +66,9 @@ pub fn apply_migrations(conn: &Connection) -> Result<()> {
     if current < 6 {
         conn.execute_batch(MIGRATION_006)?;
     }
+    if current < 7 {
+        conn.execute_batch(MIGRATION_007)?;
+    }
     conn.execute(
         "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -109,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_migrations_on_fresh_db_sets_version_to_6() {
+    fn apply_migrations_on_fresh_db_sets_version_to_7() {
         let conn = fresh_conn_with_initial();
         apply_migrations(&conn).unwrap();
         let v: Vec<u8> = conn
@@ -119,7 +123,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v.as_slice(), b"6");
+        assert_eq!(v.as_slice(), b"7");
     }
 
     #[test]
@@ -134,7 +138,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v.as_slice(), b"6");
+        assert_eq!(v.as_slice(), b"7");
     }
 
     #[test]
