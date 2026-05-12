@@ -157,6 +157,7 @@ fn process_block(lines: &[&str], start_row: usize, result: &mut ParseResult) {
         site: final_site,
         url,
         username,
+        display_name: None,
         password: final_password,
         created_at: None,
         notes,

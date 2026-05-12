@@ -23,6 +23,9 @@ pub struct ImportEntry {
     pub site: String,
     pub url: Option<String>,
     pub username: Option<String>,
+    /// Public-facing identity on the service (game handle, screen name).
+    /// Distinct from `username` (login credential). Optional.
+    pub display_name: Option<String>,
     /// Required, never empty.
     pub password: String,
     pub created_at: Option<DateTime<Utc>>,

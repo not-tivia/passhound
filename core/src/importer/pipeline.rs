@@ -320,6 +320,7 @@ mod tests {
             site: site.into(),
             url: None,
             username: user.map(|u| u.to_string()),
+            display_name: None,
             password: pw.into(),
             created_at: None,
             notes: None,

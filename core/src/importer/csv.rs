@@ -23,6 +23,11 @@ pub struct Mapping {
     pub site: Option<usize>,
     pub url: Option<usize>,
     pub username: Option<usize>,
+    /// Column index for the public-facing display name (e.g. game handle).
+    /// `#[serde(default)]` keeps backward-compat with mappings serialized
+    /// before Phase 4.2 — older shapes deserialize with None.
+    #[serde(default)]
+    pub display_name: Option<usize>,
     pub password: usize,
     pub notes: Option<usize>,
     pub created_at: Option<usize>,
@@ -53,6 +58,12 @@ const NOTES_SYNONYMS: &[&str] = &[
 const CREATED_AT_SYNONYMS: &[&str] = &[
     "created_at", "created", "date", "timestamp", "date_created",
 ];
+const DISPLAY_NAME_SYNONYMS: &[&str] = &[
+    "display name", "display_name", "displayname",
+    "account display name", "account_display_name",
+    "screen name", "screen_name", "screenname",
+    "handle", "nick", "nickname",
+];
 
 fn find_index(headers: &[String], synonyms: &[&str]) -> Option<usize> {
     for (i, h) in headers.iter().enumerate() {
@@ -78,11 +89,12 @@ pub fn auto_detect(headers: &[String]) -> Option<Mapping> {
     let site = find_index(headers, SITE_SYNONYMS);
     let url = find_index(headers, URL_SYNONYMS);
     let username = find_index(headers, USERNAME_SYNONYMS);
+    let display_name = find_index(headers, DISPLAY_NAME_SYNONYMS);
     let notes = find_index(headers, NOTES_SYNONYMS);
     let created_at = find_index(headers, CREATED_AT_SYNONYMS);
 
     let mapped: std::collections::HashSet<usize> =
-        [site, url, username, Some(password), notes, created_at]
+        [site, url, username, display_name, Some(password), notes, created_at]
             .into_iter()
             .flatten()
             .collect();
@@ -93,6 +105,7 @@ pub fn auto_detect(headers: &[String]) -> Option<Mapping> {
         site,
         url,
         username,
+        display_name,
         password,
         notes,
         created_at,
@@ -260,6 +273,11 @@ pub fn parse_file(
             .and_then(|i| rec.get(i).map(|s| s.trim()))
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
+        let display_name = map
+            .display_name
+            .and_then(|i| rec.get(i).map(|s| s.trim()))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
         // Notes assembly: start with the mapped notes column (if any), then
         // append labeled lines for each extras index whose row value is
         // non-empty. Multiple parts joined by '\n'.
@@ -294,6 +312,7 @@ pub fn parse_file(
             site,
             url,
             username,
+            display_name,
             password,
             created_at,
             notes,
@@ -399,6 +418,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
             site: Some(0),
             url: None,
             username: None,
+            display_name: None,
             password: 1,
             notes: None,
             created_at: None,
@@ -434,6 +454,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
             site: Some(0),
             url: None,
             username: None,
+            display_name: None,
             password: 1,
             notes: None,
             created_at: None,
@@ -453,6 +474,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
             site: Some(0),
             url: None,
             username: None,
+            display_name: None,
             password: 1,
             notes: None,
             created_at: None,
@@ -471,29 +493,29 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
     #[test]
     fn extras_into_notes_appends_labeled_lines() {
         let (_t, v) = vault();
-        let content = "name,login,password,displayname,total level\n\
-            RuneScape,chris,Fluffy!2014,Bob,99\n";
+        let content = "name,login,password,clan,total level\n\
+            RuneScape,chris,Fluffy!2014,BobClan,99\n";
         let f = write_csv(content);
         let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 1);
         assert_eq!(
             r.entries[0].notes.as_deref(),
-            Some("displayname: Bob\ntotal level: 99")
+            Some("clan: BobClan\ntotal level: 99")
         );
     }
 
     #[test]
     fn extras_into_notes_skips_empty_values_per_row() {
         let (_t, v) = vault();
-        let content = "name,login,password,displayname,total level\n\
-            RuneScape,chris,Fluffy!2014,Bob,99\n\
+        let content = "name,login,password,clan,total level\n\
+            RuneScape,chris,Fluffy!2014,BobClan,99\n\
             RuneScape,chris2,Fluffy!2015,,\n";
         let f = write_csv(content);
         let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 2);
         assert_eq!(
             r.entries[0].notes.as_deref(),
-            Some("displayname: Bob\ntotal level: 99")
+            Some("clan: BobClan\ntotal level: 99")
         );
         // Row 2 has empty extras → no notes generated.
         assert_eq!(r.entries[1].notes, None);
@@ -502,17 +524,17 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
     #[test]
     fn extras_into_notes_combines_with_explicit_notes_column() {
         let (_t, v) = vault();
-        // The "notes" column maps to the notes field; "displayname" and
+        // The "notes" column maps to the notes field; "clan" and
         // "total level" are extras. Notes ordered: existing notes column
         // first, then labeled extras.
-        let content = "name,login,password,notes,displayname,total level\n\
-            RuneScape,chris,Fluffy!2014,maxed combat,Bob,99\n";
+        let content = "name,login,password,notes,clan,total level\n\
+            RuneScape,chris,Fluffy!2014,maxed combat,BobClan,99\n";
         let f = write_csv(content);
         let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 1);
         assert_eq!(
             r.entries[0].notes.as_deref(),
-            Some("maxed combat\ndisplayname: Bob\ntotal level: 99")
+            Some("maxed combat\nclan: BobClan\ntotal level: 99")
         );
     }
 
@@ -522,7 +544,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
             "name".into(),
             "login".into(),
             "password".into(),
-            "displayname".into(),
+            "clan".into(),
             "total level".into(),
         ];
         let m = auto_detect(&headers).expect("password is present");
@@ -530,5 +552,30 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         assert_eq!(m.username, Some(1));
         assert_eq!(m.password, 2);
         assert_eq!(m.extras_into_notes, vec![3, 4]);
+    }
+
+    #[test]
+    fn auto_detect_maps_account_display_name() {
+        let headers: Vec<String> = vec![
+            "name".into(),
+            "login".into(),
+            "password".into(),
+            "Account Display Name".into(),
+        ];
+        let m = auto_detect(&headers).expect("password is present");
+        assert_eq!(m.display_name, Some(3));
+        // Display name column must NOT be in extras_into_notes (it's a first-class field).
+        assert!(!m.extras_into_notes.contains(&3),
+            "display_name column should be excluded from extras; got {:?}", m.extras_into_notes);
+    }
+
+    #[test]
+    fn parse_file_extracts_display_name() {
+        let (_t, v) = vault();
+        let content = "name,login,password,display name\nReddit,chris,Pw1,MaxedNoob\n";
+        let f = write_csv(content);
+        let r = parse_file(&v, f.path(), None, None).unwrap();
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(r.entries[0].display_name.as_deref(), Some("MaxedNoob"));
     }
 }
