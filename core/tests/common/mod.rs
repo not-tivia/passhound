@@ -104,6 +104,7 @@ pub fn build_vault_from_fixture() -> (tempfile::TempDir, Vault, Vec<Entry>) {
             let a = accounts::create(&v, NewAccount {
                 site_id,
                 username: entry.username.clone(),
+                display_name: None,
                 alias: None,
                 notes: None,
             }).unwrap();

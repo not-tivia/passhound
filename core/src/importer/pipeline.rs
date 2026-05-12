@@ -154,6 +154,7 @@ pub fn commit(
                             NewAccount {
                                 site_id,
                                 username: item.entry.username.clone(),
+                                display_name: None,
                                 alias: None,
                                 notes: None,
                             },

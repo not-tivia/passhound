@@ -9,6 +9,7 @@ pub struct Account {
     pub id: i64,
     pub site_id: i64,
     pub username: Option<String>,
+    pub display_name: Option<String>,
     pub alias: Option<String>,
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -18,6 +19,7 @@ pub struct Account {
 pub struct NewAccount {
     pub site_id: i64,
     pub username: Option<String>,
+    pub display_name: Option<String>,
     pub alias: Option<String>,
     pub notes: Option<String>,
 }
@@ -28,15 +30,16 @@ pub fn create(vault: &Vault, new: NewAccount) -> Result<Account> {
     }
     let now = Utc::now();
     vault.conn().execute(
-        "INSERT INTO accounts (site_id, username, alias, notes, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![new.site_id, new.username, new.alias, new.notes, now.to_rfc3339()],
+        "INSERT INTO accounts (site_id, username, display_name, alias, notes, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![new.site_id, new.username, new.display_name, new.alias, new.notes, now.to_rfc3339()],
     )?;
     let id = vault.conn().last_insert_rowid();
     Ok(Account {
         id,
         site_id: new.site_id,
         username: new.username,
+        display_name: new.display_name,
         alias: new.alias,
         notes: new.notes,
         created_at: now,
@@ -45,7 +48,7 @@ pub fn create(vault: &Vault, new: NewAccount) -> Result<Account> {
 
 pub fn get(vault: &Vault, id: i64) -> Result<Account> {
     vault.conn().query_row(
-        "SELECT id, site_id, username, alias, notes, created_at FROM accounts WHERE id = ?1",
+        "SELECT id, site_id, username, display_name, alias, notes, created_at FROM accounts WHERE id = ?1",
         params![id],
         row_to_account,
     ).map_err(|e| match e {
@@ -56,7 +59,7 @@ pub fn get(vault: &Vault, id: i64) -> Result<Account> {
 
 pub fn list_for_site(vault: &Vault, site_id: i64) -> Result<Vec<Account>> {
     let mut stmt = vault.conn().prepare(
-        "SELECT id, site_id, username, alias, notes, created_at FROM accounts
+        "SELECT id, site_id, username, display_name, alias, notes, created_at FROM accounts
          WHERE site_id = ?1 ORDER BY created_at",
     )?;
     let rows = stmt
@@ -66,7 +69,7 @@ pub fn list_for_site(vault: &Vault, site_id: i64) -> Result<Vec<Account>> {
 }
 
 fn row_to_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
-    let created_str: String = row.get(5)?;
+    let created_str: String = row.get(6)?;
     let created_at = DateTime::parse_from_rfc3339(&created_str)
         .map(|d| d.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
@@ -74,8 +77,9 @@ fn row_to_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
         id: row.get(0)?,
         site_id: row.get(1)?,
         username: row.get(2)?,
-        alias: row.get(3)?,
-        notes: row.get(4)?,
+        display_name: row.get(3)?,
+        alias: row.get(4)?,
+        notes: row.get(5)?,
         created_at,
     })
 }
@@ -100,11 +104,28 @@ mod tests {
         let a = create(&v, NewAccount {
             site_id: sid,
             username: Some("chris".into()),
+            display_name: None,
             alias: Some("main".into()),
             notes: None,
         }).unwrap();
         let fetched = get(&v, a.id).unwrap();
         assert_eq!(fetched.username.as_deref(), Some("chris"));
+    }
+
+    #[test]
+    fn create_round_trips_display_name() {
+        let (_t, v, sid) = setup();
+        let a = create(&v, NewAccount {
+            site_id: sid,
+            username: Some("xXdragonSlayerXx".into()),
+            display_name: Some("DragonSlayer".into()),
+            ..Default::default()
+        }).unwrap();
+        assert_eq!(a.display_name.as_deref(), Some("DragonSlayer"));
+        let fetched = get(&v, a.id).unwrap();
+        assert_eq!(fetched.display_name.as_deref(), Some("DragonSlayer"));
+        let listed = list_for_site(&v, sid).unwrap();
+        assert_eq!(listed[0].display_name.as_deref(), Some("DragonSlayer"));
     }
 
     #[test]

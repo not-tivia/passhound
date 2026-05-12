@@ -19,6 +19,7 @@ fn full_create_unlock_round_trip() {
     let account = accounts::create(&v, NewAccount {
         site_id: site.id,
         username: Some("chris".into()),
+        display_name: None,
         alias: Some("main".into()),
         notes: None,
     }).unwrap();
