@@ -57,6 +57,17 @@ pub fn get(vault: &Vault, id: i64) -> Result<Account> {
     })
 }
 
+pub fn delete(vault: &Vault, id: i64) -> Result<()> {
+    let n = vault.conn().execute(
+        "DELETE FROM accounts WHERE id = ?1",
+        params![id],
+    )?;
+    if n == 0 {
+        return Err(Error::NotFound);
+    }
+    Ok(())
+}
+
 pub fn list_for_site(vault: &Vault, site_id: i64) -> Result<Vec<Account>> {
     let mut stmt = vault.conn().prepare(
         "SELECT id, site_id, username, display_name, alias, notes, created_at FROM accounts
@@ -137,5 +148,32 @@ mod tests {
         create(&v, NewAccount { site_id: other.id, alias: Some("c".into()), ..Default::default() }).unwrap();
         let mine = list_for_site(&v, sid).unwrap();
         assert_eq!(mine.len(), 2);
+    }
+
+    #[test]
+    fn delete_removes_account_and_cascades_passwords() {
+        let (_t, v, sid) = setup();
+        let a = create(&v, NewAccount {
+            site_id: sid,
+            username: Some("alice".into()),
+            display_name: None,
+            alias: None,
+            notes: None,
+        }).unwrap();
+        crate::repo::passwords::insert(&v, crate::repo::passwords::NewPassword {
+            account_id: a.id,
+            plaintext: "secret",
+            source: "manual".into(),
+            confidence: crate::repo::passwords::Confidence::Certain,
+            notes: None,
+            created_at: None,
+        }).unwrap();
+
+        delete(&v, a.id).unwrap();
+
+        assert!(matches!(get(&v, a.id), Err(crate::error::Error::NotFound)));
+        let hist = crate::repo::passwords::list_history(&v, a.id).unwrap();
+        assert!(hist.is_empty(), "password history should cascade-delete");
+        assert!(matches!(delete(&v, a.id), Err(crate::error::Error::NotFound)));
     }
 }
