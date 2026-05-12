@@ -210,24 +210,13 @@ select option {
   cursor: not-allowed;
 }
 
-.vault-split {
+.vault-grid {
   flex: 1;
-  display: flex;
-  min-width: 0;
-}
-
-.vault-split__left {
-  width: 50%;
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.vault-split__right {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 200px 1fr 1.2fr;
+  gap: 0;
+  height: 100%;
+  overflow: hidden;
   min-width: 0;
 }
 
@@ -1080,3 +1069,63 @@ select option {
   font-style: italic;
   color: var(--accent);
 }
+
+/* ============================================================================
+   TagsSidebar + three-pane vault layout
+   ============================================================================ */
+
+.tags-sidebar {
+  display: flex;
+  flex-direction: column;
+  background: #14141a;
+  border-right: 1px solid #2a2a32;
+  overflow-y: auto;
+}
+.tags-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2a2a32;
+}
+.tags-sidebar__title { font-weight: bold; font-size: 11px; }
+.tags-sidebar__manage {
+  background: transparent;
+  border: none;
+  color: var(--text-1, #d0d0d8);
+  cursor: pointer;
+  font-size: 14px;
+}
+.tags-sidebar__manage:hover { color: var(--text-0); }
+.tags-sidebar__clear {
+  margin: 6px 12px;
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-1);
+  padding: 4px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.tags-sidebar__list { list-style: none; margin: 0; padding: 4px 0; }
+.tags-sidebar__row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.tags-sidebar__row:hover { background: #1a1a22; }
+.tags-sidebar__row--active { background: #2a3a4a; }
+.tags-sidebar__check { font-size: 10px; color: var(--accent, #6aa8d4); }
+.tags-sidebar__count { color: var(--text-1); font-size: 10px; }
+.tags-sidebar__empty {
+  padding: 12px;
+  font-size: 11px;
+  color: var(--text-1);
+  font-style: italic;
+}
+
+.vault-accounts { display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.vault-detail { overflow-y: auto; border-left: 1px solid #2a2a32; }

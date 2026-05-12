@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import IconRail from "../components/IconRail";
 import AccountsTable from "../components/AccountsTable";
+import TagsSidebar from "../components/TagsSidebar";
 import PerSite from "./PerSite";
 import Import from "./Import";
 import { ToastProvider } from "../components/Toast";
@@ -17,6 +18,14 @@ export default function Vault({ onLock }: VaultProps) {
   // Bump this to force AccountsTable to re-fetch after a successful import.
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
+  const [_manageOpen, setManageOpen] = useState(false);
+
+  // Clear row-level selection whenever the tag filter changes (selected rows may
+  // no longer be visible after the filter is applied).
+  useEffect(() => { setSelectedIds(new Set()); }, [filterTagIds]);
+
   return (
     <ToastProvider>
       <div className="vault-shell">
@@ -27,16 +36,27 @@ export default function Vault({ onLock }: VaultProps) {
           onVaultClick={() => setView("list")}
         />
         {view === "list" && (
-          <div className="vault-split">
-            <div className="vault-split__left">
+          <div className="vault-grid">
+            <TagsSidebar
+              filterTagIds={filterTagIds}
+              onFilterChange={setFilterTagIds}
+              onManageClick={() => setManageOpen(true)}
+              onLockedError={onLock}
+              refreshKey={refreshKey}
+            />
+            <div className="vault-accounts">
               <AccountsTable
-                key={refreshKey}
+                filterTagIds={filterTagIds}
+                selectedIds={selectedIds}
+                onSelectedIdsChange={setSelectedIds}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
+                refreshKey={refreshKey}
                 onLockedError={onLock}
               />
+              {/* BulkActionBar slot — added in Task 8 */}
             </div>
-            <div className="vault-split__right">
+            <div className="vault-detail">
               {selectedId === null ? (
                 <div className="vault-empty">Select an account from the list.</div>
               ) : (
@@ -50,6 +70,7 @@ export default function Vault({ onLock }: VaultProps) {
                 />
               )}
             </div>
+            {/* ManageTagsOverlay slot — added in Task 9 */}
           </div>
         )}
         {view === "import" && (

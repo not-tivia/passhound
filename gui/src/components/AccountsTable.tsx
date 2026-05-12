@@ -14,6 +14,10 @@ interface AccountsTableProps {
   selectedId: number | null;
   onSelect: (id: number) => void;
   onLockedError: () => void;
+  refreshKey?: number;
+  filterTagIds?: number[];
+  selectedIds?: Set<number>;
+  onSelectedIdsChange?: (ids: Set<number>) => void;
 }
 
 interface ColumnDef {
@@ -56,6 +60,10 @@ export default function AccountsTable({
   selectedId,
   onSelect,
   onLockedError,
+  refreshKey: _refreshKey = 0,
+  filterTagIds: _filterTagIds = [],
+  selectedIds: _selectedIds = new Set<number>(),
+  onSelectedIdsChange: _onSelectedIdsChange = () => {},
 }: AccountsTableProps) {
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [filter, setFilter] = useState("");
