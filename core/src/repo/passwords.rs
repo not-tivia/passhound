@@ -92,6 +92,35 @@ pub fn retire(vault: &Vault, id: i64, when: DateTime<Utc>) -> Result<()> {
     Ok(())
 }
 
+/// Promote a history row to current. Retires any existing current for that account
+/// in the same transaction so the schema invariant (at most one row with
+/// retired_at IS NULL per account) is preserved.
+pub fn promote(vault: &Vault, history_id: i64) -> Result<()> {
+    let tx = vault.conn().unchecked_transaction()?;
+    let account_id: i64 = tx.query_row(
+        "SELECT account_id FROM password_history WHERE id = ?1",
+        params![history_id],
+        |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
+        other => other.into(),
+    })?;
+
+    tx.execute(
+        "UPDATE password_history SET retired_at = ?1
+         WHERE account_id = ?2 AND retired_at IS NULL AND id != ?3",
+        params![Utc::now().to_rfc3339(), account_id, history_id],
+    )?;
+
+    tx.execute(
+        "UPDATE password_history SET retired_at = NULL WHERE id = ?1",
+        params![history_id],
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
 /// Hard-delete a single password history row by id.
 /// Returns `Error::NotFound` if no row with that id exists.
 pub fn delete(vault: &Vault, id: i64) -> Result<()> {
@@ -306,6 +335,28 @@ mod tests {
         assert!(records[0].retired_at.is_none());
         assert!(records[1].retired_at.is_some());
         assert!(records[2].retired_at.is_some());
+    }
+
+    #[test]
+    fn promote_retires_previous_current_and_clears_chosen() {
+        let (_t, v, aid) = setup();
+        let p1 = insert(&v, NewPassword {
+            account_id: aid,
+            plaintext: "old",
+            source: "manual".into(),
+            confidence: Confidence::Certain,
+            notes: None,
+            created_at: None,
+        }).unwrap();
+        set_current(&v, aid, "new", "manual").unwrap();
+
+        promote(&v, p1.id).unwrap();
+
+        let hist = list_history(&v, aid).unwrap();
+        let p1_row = hist.iter().find(|h| h.id == p1.id).unwrap();
+        assert!(p1_row.retired_at.is_none(), "promoted row should have retired_at cleared");
+        let other = hist.iter().find(|h| h.id != p1.id).unwrap();
+        assert!(other.retired_at.is_some(), "previous current should now be retired");
     }
 
     #[test]

@@ -59,6 +59,24 @@ pub fn get(vault: &Vault, id: i64) -> Result<Site> {
     })
 }
 
+pub fn find_by_name(vault: &Vault, name: &str) -> Result<Option<Site>> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let res = vault.conn().query_row(
+        "SELECT id, name, url, category, abbreviations, notes, created_at
+         FROM sites WHERE LOWER(name) = LOWER(?1)",
+        params![trimmed],
+        row_to_site,
+    );
+    match res {
+        Ok(s) => Ok(Some(s)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn list(vault: &Vault) -> Result<Vec<Site>> {
     let mut stmt = vault.conn().prepare(
         "SELECT id, name, url, category, abbreviations, notes, created_at FROM sites ORDER BY name",
@@ -137,5 +155,18 @@ mod tests {
         let (_tmp, v) = vault();
         let err = get(&v, 999).unwrap_err();
         assert!(matches!(err, Error::NotFound));
+    }
+
+    #[test]
+    fn find_by_name_is_case_insensitive_and_returns_none_for_missing() {
+        let (_tmp, v) = vault();
+        create(&v, NewSite { name: "RuneScape".into(), ..Default::default() }).unwrap();
+        let found = find_by_name(&v, "runescape").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "RuneScape");
+        let missing = find_by_name(&v, "nonexistent").unwrap();
+        assert!(missing.is_none());
+        let empty = find_by_name(&v, "   ").unwrap();
+        assert!(empty.is_none());
     }
 }

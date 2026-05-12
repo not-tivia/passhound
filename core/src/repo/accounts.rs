@@ -57,6 +57,28 @@ pub fn get(vault: &Vault, id: i64) -> Result<Account> {
     })
 }
 
+/// Fields to update on an existing account. Each `Option<String>` is the new value
+/// (including `None` meaning NULL / clear the field). All four fields are always written.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateAccount {
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub alias: Option<String>,
+    pub notes: Option<String>,
+}
+
+pub fn update(vault: &Vault, id: i64, changes: UpdateAccount) -> Result<()> {
+    let n = vault.conn().execute(
+        "UPDATE accounts SET username = ?1, display_name = ?2, alias = ?3, notes = ?4
+         WHERE id = ?5",
+        params![changes.username, changes.display_name, changes.alias, changes.notes, id],
+    )?;
+    if n == 0 {
+        return Err(Error::NotFound);
+    }
+    Ok(())
+}
+
 pub fn delete(vault: &Vault, id: i64) -> Result<()> {
     let n = vault.conn().execute(
         "DELETE FROM accounts WHERE id = ?1",
@@ -246,6 +268,36 @@ mod tests {
         let hist = crate::repo::passwords::list_history(&v, a.id).unwrap();
         assert!(hist.is_empty(), "password history should cascade-delete");
         assert!(matches!(delete(&v, a.id), Err(crate::error::Error::NotFound)));
+    }
+
+    #[test]
+    fn update_overwrites_fields_and_returns_not_found_for_missing() {
+        let (_t, v, sid) = setup();
+        let a = create(&v, NewAccount {
+            site_id: sid,
+            username: Some("original".into()),
+            display_name: None,
+            alias: None,
+            notes: None,
+        }).unwrap();
+        update(&v, a.id, UpdateAccount {
+            username: Some("updated".into()),
+            display_name: Some("Display Name".into()),
+            alias: None,
+            notes: None,
+        }).unwrap();
+        let fetched = get(&v, a.id).unwrap();
+        assert_eq!(fetched.username.as_deref(), Some("updated"));
+        assert_eq!(fetched.display_name.as_deref(), Some("Display Name"));
+        assert!(fetched.alias.is_none());
+
+        // NULL out username
+        update(&v, a.id, UpdateAccount { username: None, ..Default::default() }).unwrap();
+        let fetched2 = get(&v, a.id).unwrap();
+        assert!(fetched2.username.is_none());
+
+        // NotFound for non-existent id
+        assert!(matches!(update(&v, 999, UpdateAccount::default()), Err(crate::error::Error::NotFound)));
     }
 
     #[test]
