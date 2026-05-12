@@ -24,6 +24,8 @@ fn main() {
             attach_file,
             read_attachment,
             delete_attachment,
+            delete_account,
+            delete_password,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

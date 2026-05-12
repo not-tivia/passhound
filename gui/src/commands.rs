@@ -665,6 +665,30 @@ pub fn delete_attachment_inner(
     Ok(())
 }
 
+#[tauri::command]
+pub fn delete_account(state: State<'_, VaultState>, account_id: i64) -> Result<(), GuiError> {
+    delete_account_inner(&state, account_id)
+}
+
+pub fn delete_account_inner(state: &VaultState, account_id: i64) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::accounts::delete(v, account_id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_password(state: State<'_, VaultState>, history_id: i64) -> Result<(), GuiError> {
+    delete_password_inner(&state, history_id)
+}
+
+pub fn delete_password_inner(state: &VaultState, history_id: i64) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::passwords::delete(v, history_id)?;
+    Ok(())
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -994,5 +1018,91 @@ mod tests {
 
         let list = list_attachments_inner(&state, account_id).unwrap();
         assert!(list.is_empty(), "expected empty list after delete; got {list:?}");
+    }
+
+    #[test]
+    fn delete_account_removes_row_and_cascades() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let account_id = {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "DeleteMe".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id,
+                username: Some("to_delete".into()),
+                ..Default::default()
+            }).unwrap();
+            passwords::insert(v, passwords::NewPassword {
+                account_id: a.id,
+                plaintext: "password123",
+                source: "manual".into(),
+                confidence: passwords::Confidence::Certain,
+                notes: None,
+                created_at: None,
+            }).unwrap();
+            a.id
+        };
+
+        // Attach a file so we can verify cascade deletes it too.
+        attach_file_inner(
+            &state, account_id, "doc.txt", "text/plain",
+            &STANDARD.encode(b"contents"),
+        ).unwrap();
+
+        // Sanity: account is present before delete.
+        let before = list_accounts_inner(&state, None).unwrap();
+        assert_eq!(before.len(), 1);
+
+        delete_account_inner(&state, account_id).unwrap();
+
+        // Account is gone.
+        let after = list_accounts_inner(&state, None).unwrap();
+        assert!(after.is_empty(), "expected no accounts after delete; got {} rows", after.len());
+
+        // Attachment cascaded away.
+        let attachments = list_attachments_inner(&state, account_id).unwrap();
+        assert!(attachments.is_empty(), "expected attachments cascade-deleted; got {attachments:?}");
+    }
+
+    #[test]
+    fn delete_password_removes_one_history_row() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let (account_id, first_id) = {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "Site".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            let pw1 = passwords::insert(v, passwords::NewPassword {
+                account_id: a.id,
+                plaintext: "first-password",
+                source: "manual".into(),
+                confidence: passwords::Confidence::Certain,
+                notes: None,
+                created_at: None,
+            }).unwrap();
+            passwords::set_current(v, a.id, "second-password", "manual").unwrap();
+            (a.id, pw1.id)
+        };
+
+        // Two history rows before delete.
+        let before = get_account_inner(&state, account_id).unwrap();
+        assert_eq!(before.history.len(), 2);
+
+        delete_password_inner(&state, first_id).unwrap();
+
+        // One history row remains.
+        let after = get_account_inner(&state, account_id).unwrap();
+        assert_eq!(after.history.len(), 1, "expected 1 history row after deleting one; got {:?}", after.history.len());
     }
 }
