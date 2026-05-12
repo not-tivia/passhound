@@ -92,6 +92,19 @@ pub fn retire(vault: &Vault, id: i64, when: DateTime<Utc>) -> Result<()> {
     Ok(())
 }
 
+/// Hard-delete a single password history row by id.
+/// Returns `Error::NotFound` if no row with that id exists.
+pub fn delete(vault: &Vault, id: i64) -> Result<()> {
+    let n = vault.conn().execute(
+        "DELETE FROM password_history WHERE id = ?1",
+        params![id],
+    )?;
+    if n == 0 {
+        return Err(Error::NotFound);
+    }
+    Ok(())
+}
+
 /// Return the current (non-retired) password's plaintext for an account, if any.
 pub fn current_plaintext(vault: &Vault, account_id: i64) -> Result<Option<Zeroizing<String>>> {
     let key = vault.require_key()?;
@@ -293,5 +306,32 @@ mod tests {
         assert!(records[0].retired_at.is_none());
         assert!(records[1].retired_at.is_some());
         assert!(records[2].retired_at.is_some());
+    }
+
+    #[test]
+    fn delete_removes_one_history_row() {
+        let (_t, v, aid) = setup();
+        let p1 = insert(&v, NewPassword {
+            account_id: aid,
+            plaintext: "alpha",
+            source: "manual".into(),
+            confidence: Confidence::Certain,
+            notes: None,
+            created_at: None,
+        }).unwrap();
+        let _p2 = insert(&v, NewPassword {
+            account_id: aid,
+            plaintext: "beta",
+            source: "manual".into(),
+            confidence: Confidence::Certain,
+            notes: None,
+            created_at: None,
+        }).unwrap();
+
+        delete(&v, p1.id).unwrap();
+
+        let remaining = list_history(&v, aid).unwrap();
+        assert_eq!(remaining.len(), 1, "only one history row should remain");
+        assert!(matches!(delete(&v, p1.id), Err(crate::error::Error::NotFound)));
     }
 }
