@@ -9,6 +9,8 @@ import type {
   Mapping,
   PreviewResult,
   CommitResult,
+  TagSummary,
+  TagWithCount,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -29,8 +31,8 @@ export const api = {
   vaultCreate: (masterPw: string) => call<void>("vault_create", { masterPw }),
   vaultUnlock: (masterPw: string) => call<void>("vault_unlock", { masterPw }),
   vaultLock: () => call<void>("vault_lock"),
-  listAccounts: (filter?: string) =>
-    call<AccountSummary[]>("list_accounts", { filter: filter || null }),
+  listAccounts: (filter?: string, tagIds?: number[]) =>
+    call<AccountSummary[]>("list_accounts", { filter: filter || null, tagIds: tagIds ?? null }),
   getAccount: (id: number) => call<AccountDetail>("get_account", { id }),
   revealPassword: (historyId: number) =>
     call<string>("reveal_password", { historyId }),
@@ -91,6 +93,18 @@ export const api = {
     call<void>("delete_attachment", { attachmentId }),
   deleteAccount: (id: number) => call<void>("delete_account", { accountId: id }),
   deletePassword: (historyId: number) => call<void>("delete_password", { historyId }),
+
+  // Phase 4.6 — Tags
+  listTags: () => call<TagWithCount[]>("list_tags"),
+  createTag: (name: string) => call<TagSummary>("create_tag", { name }),
+  renameTag: (tagId: number, newName: string) => call<void>("rename_tag", { tagId, newName }),
+  deleteTag: (tagId: number) => call<void>("delete_tag", { tagId }),
+  listAccountTags: (accountId: number) => call<TagSummary[]>("list_account_tags", { accountId }),
+  assignTag: (accountId: number, tagId: number) => call<void>("assign_tag", { accountId, tagId }),
+  unassignTag: (accountId: number, tagId: number) => call<void>("unassign_tag", { accountId, tagId }),
+  bulkAssignTag: (accountIds: number[], tagId: number) => call<number>("bulk_assign_tag", { accountIds, tagId }),
+  bulkUnassignTag: (accountIds: number[], tagId: number) => call<number>("bulk_unassign_tag", { accountIds, tagId }),
+  bulkDeleteAccounts: (accountIds: number[]) => call<number>("bulk_delete_accounts", { accountIds }),
 
   // Native save dialog via @tauri-apps/plugin-dialog. Returns null if user cancels.
   saveFileDialog: async (defaultName: string): Promise<string | null> => {

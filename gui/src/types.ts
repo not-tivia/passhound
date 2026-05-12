@@ -8,6 +8,7 @@ export interface AccountSummary {
   display_name: string | null;
   last_changed: string | null;
   category: string | null;
+  tags: TagSummary[];
 }
 
 export interface AccountDetail {
@@ -19,6 +20,7 @@ export interface AccountDetail {
   username: string | null;
   display_name: string | null;
   history: HistoryEntry[];
+  tags: TagSummary[];
 }
 
 export interface HistoryEntry {
@@ -82,6 +84,25 @@ export interface PreviewResult {
 export interface CommitResult {
   import_id: number;
   counts: PreviewCounts;
+}
+
+// Phase 4.6 — Tags
+
+export interface Tag {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export interface TagWithCount {
+  id: number;
+  name: string;
+  account_count: number;
+}
+
+export interface TagSummary {
+  id: number;
+  name: string;
 }
 
 // Phase 4.4 — Attachments

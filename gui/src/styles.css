@@ -1004,3 +1004,79 @@ select option {
   background: #3a1a1a;
   color: var(--text-0);
 }
+
+/* ============================================================================
+   Phase 4.6 — Tags
+   ============================================================================ */
+
+/* Tag chip */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #2a2a32;
+  border: 1px solid #3a3a44;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 10px;
+  color: var(--text-1);
+  user-select: none;
+}
+.tag-chip--active {
+  background: #2a3a4a;
+  border-color: #4a6a8a;
+  color: var(--text-0);
+}
+.tag-chip--clickable { cursor: pointer; }
+.tag-chip__remove {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 2px;
+  font-size: 12px;
+  line-height: 1;
+}
+.tag-chip__remove:hover { color: var(--error); }
+
+/* Tag picker */
+.tag-picker {
+  display: flex;
+  flex-direction: column;
+  background: #1a1a22;
+  border: 1px solid #3a3a44;
+  border-radius: 4px;
+  min-width: 200px;
+  max-width: 280px;
+}
+.tag-picker__input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #2a2a32;
+  padding: 6px 10px;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.tag-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.tag-picker__option {
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-1);
+}
+.tag-picker__option--highlight {
+  background: #2a3a4a;
+  color: var(--text-0);
+}
+.tag-picker__option--create {
+  font-style: italic;
+  color: var(--accent);
+}
