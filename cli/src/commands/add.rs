@@ -58,6 +58,7 @@ pub fn run(path: &Path, args: AddArgs) -> Result<()> {
     let account = accounts::create(&vault, NewAccount {
         site_id,
         username: args.username,
+        display_name: None,
         alias: args.alias,
         notes: None,
     })?;
