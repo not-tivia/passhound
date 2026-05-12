@@ -34,12 +34,25 @@ pub struct Mapping {
     pub extras_into_notes: Vec<usize>,
 }
 
-const SITE_SYNONYMS: &[&str] = &["name", "site", "site_name", "website", "title"];
-const URL_SYNONYMS: &[&str] = &["url", "login_url", "web_address"];
-const USERNAME_SYNONYMS: &[&str] = &["username", "login", "user", "email"];
-const PASSWORD_SYNONYMS: &[&str] = &["password", "pass"];
-const NOTES_SYNONYMS: &[&str] = &["note", "notes", "comment", "comments"];
-const CREATED_AT_SYNONYMS: &[&str] = &["created_at", "created", "date", "timestamp"];
+const SITE_SYNONYMS: &[&str] = &[
+    "name", "site", "site_name", "website", "title", "service",
+];
+const URL_SYNONYMS: &[&str] = &["url", "login_url", "web_address", "link"];
+const USERNAME_SYNONYMS: &[&str] = &[
+    "username", "login", "user", "email", "account login",
+    "account_login", "account email", "account_email", "user name",
+    "user_name", "account name", "account_name",
+];
+const PASSWORD_SYNONYMS: &[&str] = &[
+    "password", "pass", "pwd", "passwd", "account password",
+    "account_password", "master password", "master_password",
+];
+const NOTES_SYNONYMS: &[&str] = &[
+    "note", "notes", "comment", "comments", "description", "remarks",
+];
+const CREATED_AT_SYNONYMS: &[&str] = &[
+    "created_at", "created", "date", "timestamp", "date_created",
+];
 
 fn find_index(headers: &[String], synonyms: &[&str]) -> Option<usize> {
     for (i, h) in headers.iter().enumerate() {
