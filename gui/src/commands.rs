@@ -249,12 +249,15 @@ pub fn list_accounts_inner(
 #[derive(Serialize)]
 pub struct AccountDetail {
     pub id: i64,
+    pub site_id: i64,
     pub site_name: String,
     pub site_url: Option<String>,
     pub site_category: Option<String>,
     pub site_abbreviations: Vec<String>,
     pub username: Option<String>,
     pub display_name: Option<String>,
+    pub alias: Option<String>,
+    pub notes: Option<String>,
     pub history: Vec<HistoryEntry>,
     #[serde(default)]
     pub tags: Vec<TagSummary>,
@@ -307,12 +310,15 @@ pub fn get_account_inner(state: &VaultState, id: i64) -> Result<AccountDetail, G
         .collect();
     Ok(AccountDetail {
         id: acct.id,
+        site_id: acct.site_id,
         site_name: site.name,
         site_url: site.url,
         site_category: site.category,
         site_abbreviations: site.abbreviations,
         username: acct.username,
         display_name: acct.display_name,
+        alias: acct.alias,
+        notes: acct.notes,
         history,
         tags,
     })
