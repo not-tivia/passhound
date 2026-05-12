@@ -5,6 +5,7 @@ export interface AccountSummary {
   id: number;
   site_name: string;
   username: string | null;
+  display_name: string | null;
   last_changed: string | null;
   category: string | null;
 }
@@ -16,6 +17,7 @@ export interface AccountDetail {
   site_category: string | null;
   site_abbreviations: string[];
   username: string | null;
+  display_name: string | null;
   history: HistoryEntry[];
 }
 
@@ -46,6 +48,7 @@ export interface Mapping {
   site: number | null;
   url: number | null;
   username: number | null;
+  display_name: number | null;
   password: number;
   notes: number | null;
   created_at: number | null;
@@ -62,6 +65,7 @@ export interface PreviewCounts {
 export interface SampleRow {
   site: string;
   username: string | null;
+  display_name: string | null;
   password_length: number;
   notes: string | null;
 }

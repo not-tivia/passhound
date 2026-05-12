@@ -76,7 +76,7 @@ export default function AccountsTable({
             <thead>
               <tr>
                 <th>Site</th>
-                <th>User</th>
+                <th>User · Display</th>
                 <th>Last</th>
               </tr>
             </thead>
@@ -88,7 +88,12 @@ export default function AccountsTable({
                   onClick={() => onSelect(a.id)}
                 >
                   <td>{a.site_name}</td>
-                  <td>{a.username ?? <span className="muted">—</span>}</td>
+                  <td>
+                    {a.username ?? <span className="muted">—</span>}
+                    {a.display_name && (
+                      <div className="accounts-table__display-name">{a.display_name}</div>
+                    )}
+                  </td>
                   <td>{a.last_changed ? a.last_changed.slice(0, 7) : <span className="muted">—</span>}</td>
                 </tr>
               ))}

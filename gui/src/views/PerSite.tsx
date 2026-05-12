@@ -46,6 +46,12 @@ export default function PerSite({ accountId, onLockedError }: PerSiteProps) {
         <div className="per-site__user">
           {detail.username ?? "(no username)"}
         </div>
+        {detail.display_name && (
+          <div className="per-site__display-name">
+            <span className="per-site__field-label">display</span>{" "}
+            {detail.display_name}
+          </div>
+        )}
       </div>
 
       <div className="per-site__body">

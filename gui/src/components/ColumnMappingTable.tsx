@@ -3,6 +3,7 @@ import type { Mapping } from "../types";
 export type ColumnRole =
   | "site"
   | "username"
+  | "display_name"
   | "password"
   | "url"
   | "notes"
@@ -13,6 +14,7 @@ export type ColumnRole =
 const ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: "site", label: "site" },
   { value: "username", label: "username" },
+  { value: "display_name", label: "display name" },
   { value: "password", label: "password" },
   { value: "url", label: "url" },
   { value: "notes", label: "notes" },
@@ -28,6 +30,7 @@ const ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
 const SINGLE_INDEX_ROLES: ColumnRole[] = [
   "site",
   "username",
+  "display_name",
   "password",
   "url",
   "notes",
@@ -116,6 +119,7 @@ export function rolesToMapping(roles: ColumnRole[]): Mapping {
     site: findOne("site"),
     url: findOne("url"),
     username: findOne("username"),
+    display_name: findOne("display_name"),
     password,
     notes: findOne("notes"),
     created_at: findOne("created_at"),
@@ -141,6 +145,7 @@ export function mappingToRoles(headers: string[], mapping: Mapping): ColumnRole[
   assign(mapping.site, "site");
   assign(mapping.url, "url");
   assign(mapping.username, "username");
+  assign(mapping.display_name, "display_name");
   assign(mapping.password, "password");
   assign(mapping.notes, "notes");
   assign(mapping.created_at, "created_at");

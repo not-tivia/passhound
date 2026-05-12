@@ -24,6 +24,7 @@ export default function ImportPreview({ result }: ImportPreviewProps) {
             <tr>
               <th>SITE</th>
               <th>USERNAME</th>
+              <th>DISPLAY</th>
               <th>PASSWORD</th>
               <th>NOTES</th>
             </tr>
@@ -33,6 +34,7 @@ export default function ImportPreview({ result }: ImportPreviewProps) {
               <tr key={i}>
                 <td>{r.site}</td>
                 <td>{r.username ?? <span className="muted">—</span>}</td>
+                <td>{r.display_name ?? <span className="muted">—</span>}</td>
                 <td>
                   <span className="import-preview__pwd">
                     {"•".repeat(Math.min(r.password_length, 12))}
