@@ -801,6 +801,165 @@ pub fn delete_password_inner(state: &VaultState, history_id: i64) -> Result<(), 
 }
 
 // ============================================================================
+// Account mutation (Phase 4.7)
+// ============================================================================
+
+/// Fields for creating a new account, optionally seeding its first password.
+#[derive(serde::Deserialize, Debug)]
+pub struct AddAccountFields {
+    pub site_id: i64,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub alias: Option<String>,
+    pub notes: Option<String>,
+    pub initial_password: Option<String>,
+}
+
+/// Fields to overwrite on an existing account.
+#[derive(serde::Deserialize, Debug)]
+pub struct UpdateAccountFields {
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub alias: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Slim site descriptor returned by `find_or_create_site`.
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct SiteSummary {
+    pub id: i64,
+    pub name: String,
+}
+
+#[tauri::command]
+pub fn find_or_create_site(
+    state: State<'_, VaultState>,
+    name: String,
+) -> Result<SiteSummary, GuiError> {
+    find_or_create_site_inner(&state, &name)
+}
+
+pub fn find_or_create_site_inner(
+    state: &VaultState,
+    name: &str,
+) -> Result<SiteSummary, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let trimmed = name.trim();
+    if let Some(s) = passhound_core::repo::sites::find_by_name(v, trimmed)? {
+        return Ok(SiteSummary { id: s.id, name: s.name });
+    }
+    let s = passhound_core::repo::sites::create(
+        v,
+        passhound_core::repo::sites::NewSite {
+            name: trimmed.to_string(),
+            ..Default::default()
+        },
+    )?;
+    Ok(SiteSummary { id: s.id, name: s.name })
+}
+
+#[tauri::command]
+pub fn add_account(
+    state: State<'_, VaultState>,
+    fields: AddAccountFields,
+) -> Result<i64, GuiError> {
+    add_account_inner(&state, &fields)
+}
+
+pub fn add_account_inner(
+    state: &VaultState,
+    fields: &AddAccountFields,
+) -> Result<i64, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let acct = passhound_core::repo::accounts::create(
+        v,
+        passhound_core::repo::accounts::NewAccount {
+            site_id: fields.site_id,
+            username: fields.username.clone(),
+            display_name: fields.display_name.clone(),
+            alias: fields.alias.clone(),
+            notes: fields.notes.clone(),
+            ..Default::default()
+        },
+    )?;
+    if let Some(pw) = fields.initial_password.as_ref() {
+        if !pw.is_empty() {
+            passhound_core::repo::passwords::set_current(v, acct.id, pw, "manual")?;
+        }
+    }
+    Ok(acct.id)
+}
+
+#[tauri::command]
+pub fn update_account(
+    state: State<'_, VaultState>,
+    account_id: i64,
+    fields: UpdateAccountFields,
+) -> Result<(), GuiError> {
+    update_account_inner(&state, account_id, &fields)
+}
+
+pub fn update_account_inner(
+    state: &VaultState,
+    account_id: i64,
+    fields: &UpdateAccountFields,
+) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::accounts::update(
+        v,
+        account_id,
+        passhound_core::repo::accounts::UpdateAccount {
+            username: fields.username.clone(),
+            display_name: fields.display_name.clone(),
+            alias: fields.alias.clone(),
+            notes: fields.notes.clone(),
+        },
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn add_password(
+    state: State<'_, VaultState>,
+    account_id: i64,
+    plaintext: String,
+) -> Result<i64, GuiError> {
+    add_password_inner(&state, account_id, &plaintext)
+}
+
+pub fn add_password_inner(
+    state: &VaultState,
+    account_id: i64,
+    plaintext: &str,
+) -> Result<i64, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let record = passhound_core::repo::passwords::set_current(v, account_id, plaintext, "manual")?;
+    Ok(record.id)
+}
+
+#[tauri::command]
+pub fn promote_password(
+    state: State<'_, VaultState>,
+    history_id: i64,
+) -> Result<(), GuiError> {
+    promote_password_inner(&state, history_id)
+}
+
+pub fn promote_password_inner(
+    state: &VaultState,
+    history_id: i64,
+) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::passwords::promote(v, history_id)?;
+    Ok(())
+}
+
+// ============================================================================
 // Tags (Phase 4.6)
 // ============================================================================
 
@@ -1495,5 +1654,105 @@ mod tests {
         assert_eq!(n, 2);
         let remaining = list_accounts_inner(&state, None, None).unwrap();
         assert!(remaining.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 4.7 account mutation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn add_account_with_initial_password_creates_both() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let site = find_or_create_site_inner(&state, "Reddit").unwrap();
+        let aid = add_account_inner(&state, &AddAccountFields {
+            site_id: site.id,
+            username: Some("alice".into()),
+            display_name: None,
+            alias: None,
+            notes: None,
+            initial_password: Some("hunter2".into()),
+        }).unwrap();
+        let detail = get_account_inner(&state, aid).unwrap();
+        assert_eq!(detail.history.len(), 1);
+    }
+
+    #[test]
+    fn add_account_without_password_creates_account_only() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let site = find_or_create_site_inner(&state, "Twitter").unwrap();
+        let aid = add_account_inner(&state, &AddAccountFields {
+            site_id: site.id,
+            username: Some("bob".into()),
+            display_name: None,
+            alias: None,
+            notes: None,
+            initial_password: None,
+        }).unwrap();
+        let detail = get_account_inner(&state, aid).unwrap();
+        assert!(detail.history.is_empty());
+    }
+
+    #[test]
+    fn update_account_changes_fields() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let site = find_or_create_site_inner(&state, "Gmail").unwrap();
+        let aid = add_account_inner(&state, &AddAccountFields {
+            site_id: site.id,
+            username: Some("alice".into()),
+            display_name: None,
+            alias: None,
+            notes: None,
+            initial_password: None,
+        }).unwrap();
+        update_account_inner(&state, aid, &UpdateAccountFields {
+            username: Some("bob".into()),
+            display_name: None,
+            alias: None,
+            notes: Some("updated note".into()),
+        }).unwrap();
+        // AccountDetail doesn't expose notes, so verify username via IPC and notes via repo.
+        let detail = get_account_inner(&state, aid).unwrap();
+        assert_eq!(detail.username.as_deref(), Some("bob"));
+        let acct = {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            accounts::get(v, aid).unwrap()
+        };
+        assert_eq!(acct.notes.as_deref(), Some("updated note"));
+    }
+
+    #[test]
+    fn promote_password_makes_chosen_row_current_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let site = find_or_create_site_inner(&state, "Site").unwrap();
+        let aid = add_account_inner(&state, &AddAccountFields {
+            site_id: site.id,
+            username: Some("u".into()),
+            display_name: None,
+            alias: None,
+            notes: None,
+            initial_password: Some("first".into()),
+        }).unwrap();
+        add_password_inner(&state, aid, "second").unwrap();
+
+        let detail = get_account_inner(&state, aid).unwrap();
+        // Find the oldest row (the one that's currently retired).
+        let first_id = detail.history.iter()
+            .min_by_key(|h| h.id)
+            .unwrap().id;
+
+        promote_password_inner(&state, first_id).unwrap();
+
+        let detail = get_account_inner(&state, aid).unwrap();
+        let promoted = detail.history.iter().find(|h| h.id == first_id).unwrap();
+        assert!(promoted.is_current, "promoted row should be current (is_current=true)");
     }
 }

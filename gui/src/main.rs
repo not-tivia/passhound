@@ -36,6 +36,11 @@ fn main() {
             bulk_assign_tag,
             bulk_unassign_tag,
             bulk_delete_accounts,
+            find_or_create_site,
+            add_account,
+            update_account,
+            add_password,
+            promote_password,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
