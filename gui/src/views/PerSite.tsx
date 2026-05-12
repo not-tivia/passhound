@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import AttachmentsSection from "../components/AttachmentsSection";
 import PasswordCell from "../components/PasswordCell";
 import type { AccountDetail, GuiError } from "../types";
 
@@ -77,6 +78,7 @@ export default function PerSite({ accountId, onLockedError }: PerSiteProps) {
             <div className="per-site__date">{h.created_at.slice(0, 10)} · {h.source}</div>
           </div>
         ))}
+        <AttachmentsSection accountId={detail.id} />
       </div>
     </div>
   );
