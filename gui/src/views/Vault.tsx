@@ -40,7 +40,14 @@ export default function Vault({ onLock }: VaultProps) {
               {selectedId === null ? (
                 <div className="vault-empty">Select an account from the list.</div>
               ) : (
-                <PerSite accountId={selectedId} onLockedError={onLock} />
+                <PerSite
+                  accountId={selectedId}
+                  onLockedError={onLock}
+                  onAccountDeleted={() => {
+                    setSelectedId(null);
+                    setRefreshKey((k) => k + 1);
+                  }}
+                />
               )}
             </div>
           </div>

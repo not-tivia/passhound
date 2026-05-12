@@ -6,9 +6,10 @@ import type { GuiError } from "../types";
 interface PasswordCellProps {
   historyId: number;
   onLockedError: () => void;
+  onDelete: () => void;
 }
 
-export default function PasswordCell({ historyId, onLockedError }: PasswordCellProps) {
+export default function PasswordCell({ historyId, onLockedError, onDelete }: PasswordCellProps) {
   const [revealed, setRevealed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -49,6 +50,21 @@ export default function PasswordCell({ historyId, onLockedError }: PasswordCellP
     }
   };
 
+  const handleDelete = async () => {
+    if (!confirm("Delete this password entry? This cannot be undone.")) return;
+    setBusy(true);
+    try {
+      await api.deletePassword(historyId);
+      onDelete();
+    } catch (e) {
+      const err = e as GuiError;
+      if (err.kind === "Locked") onLockedError();
+      else toast.show(`Delete failed: ${err.message ?? err.kind}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="pwd-cell">
       <span className="pwd-cell__value">
@@ -59,6 +75,15 @@ export default function PasswordCell({ historyId, onLockedError }: PasswordCellP
       </button>
       <button className="pwd-cell__btn" onClick={handleCopy} disabled={busy}>
         copy
+      </button>
+      <button
+        className="pwd-cell__btn pwd-cell__btn--delete"
+        onClick={handleDelete}
+        disabled={busy}
+        aria-label="Delete password"
+        title="Delete this password"
+      >
+        &times;
       </button>
     </div>
   );

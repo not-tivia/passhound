@@ -965,3 +965,42 @@ select option {
   padding: 10px 16px;
   border: 1px solid var(--border);
 }
+
+/* ============================================================================
+   Delete affordances (Phase 4.5)
+   ============================================================================ */
+
+.per-site__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.per-site__delete-account {
+  background: transparent;
+  border: 1px solid #5a2a2a;
+  color: var(--error);
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.per-site__delete-account:hover {
+  background: #2a1a1a;
+}
+
+.pwd-cell__btn--delete {
+  color: var(--error);
+  visibility: hidden;
+}
+
+.per-site__entry:hover .pwd-cell__btn--delete {
+  visibility: visible;
+}
+
+.pwd-cell__btn--delete:hover:not(:disabled) {
+  background: #3a1a1a;
+  color: var(--text-0);
+}

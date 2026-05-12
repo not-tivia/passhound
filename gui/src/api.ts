@@ -89,6 +89,8 @@ export const api = {
     call<AttachmentRead>("read_attachment", { attachmentId }),
   deleteAttachment: (attachmentId: number) =>
     call<void>("delete_attachment", { attachmentId }),
+  deleteAccount: (id: number) => call<void>("delete_account", { accountId: id }),
+  deletePassword: (historyId: number) => call<void>("delete_password", { historyId }),
 
   // Native save dialog via @tauri-apps/plugin-dialog. Returns null if user cancels.
   saveFileDialog: async (defaultName: string): Promise<string | null> => {
