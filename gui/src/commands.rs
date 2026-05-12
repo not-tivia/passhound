@@ -838,6 +838,18 @@ pub struct SiteSummary {
 }
 
 #[tauri::command]
+pub fn list_sites(state: State<'_, VaultState>) -> Result<Vec<SiteSummary>, GuiError> {
+    list_sites_inner(&state)
+}
+
+pub fn list_sites_inner(state: &VaultState) -> Result<Vec<SiteSummary>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let sites = passhound_core::repo::sites::list(v)?;
+    Ok(sites.into_iter().map(|s| SiteSummary { id: s.id, name: s.name }).collect())
+}
+
+#[tauri::command]
 pub fn find_or_create_site(
     state: State<'_, VaultState>,
     name: String,
@@ -1665,6 +1677,15 @@ mod tests {
     // -----------------------------------------------------------------------
     // Phase 4.7 account mutation tests
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn list_sites_empty_vault_returns_empty() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let sites = list_sites_inner(&state).unwrap();
+        assert!(sites.is_empty());
+    }
 
     #[test]
     fn add_account_with_initial_password_creates_both() {

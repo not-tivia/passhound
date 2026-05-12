@@ -9,6 +9,7 @@ import type {
   Mapping,
   PreviewResult,
   CommitResult,
+  SiteSummary,
   TagSummary,
   TagWithCount,
 } from "./types";
@@ -105,6 +106,38 @@ export const api = {
   bulkAssignTag: (accountIds: number[], tagId: number) => call<number>("bulk_assign_tag", { accountIds, tagId }),
   bulkUnassignTag: (accountIds: number[], tagId: number) => call<number>("bulk_unassign_tag", { accountIds, tagId }),
   bulkDeleteAccounts: (accountIds: number[]) => call<number>("bulk_delete_accounts", { accountIds }),
+
+  // Phase 4.7 — Account mutation
+  listSites: () => call<SiteSummary[]>("list_sites"),
+  findOrCreateSite: (name: string) => call<SiteSummary>("find_or_create_site", { name }),
+  addAccount: (fields: {
+    siteId: number;
+    username?: string | null;
+    displayName?: string | null;
+    alias?: string | null;
+    notes?: string | null;
+    initialPassword?: string | null;
+  }) => call<number>("add_account", { fields: {
+    site_id: fields.siteId,
+    username: fields.username ?? null,
+    display_name: fields.displayName ?? null,
+    alias: fields.alias ?? null,
+    notes: fields.notes ?? null,
+    initial_password: fields.initialPassword ?? null,
+  } }),
+  updateAccount: (accountId: number, fields: {
+    username?: string | null;
+    displayName?: string | null;
+    alias?: string | null;
+    notes?: string | null;
+  }) => call<void>("update_account", { accountId, fields: {
+    username: fields.username ?? null,
+    display_name: fields.displayName ?? null,
+    alias: fields.alias ?? null,
+    notes: fields.notes ?? null,
+  } }),
+  addPassword: (accountId: number, plaintext: string) => call<number>("add_password", { accountId, plaintext }),
+  promotePassword: (historyId: number) => call<void>("promote_password", { historyId }),
 
   // Native save dialog via @tauri-apps/plugin-dialog. Returns null if user cancels.
   saveFileDialog: async (defaultName: string): Promise<string | null> => {

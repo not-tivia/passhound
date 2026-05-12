@@ -36,6 +36,7 @@ fn main() {
             bulk_assign_tag,
             bulk_unassign_tag,
             bulk_delete_accounts,
+            list_sites,
             find_or_create_site,
             add_account,
             update_account,

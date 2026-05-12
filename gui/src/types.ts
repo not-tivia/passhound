@@ -13,12 +13,15 @@ export interface AccountSummary {
 
 export interface AccountDetail {
   id: number;
+  site_id: number;
   site_name: string;
   site_url: string | null;
   site_category: string | null;
   site_abbreviations: string[];
   username: string | null;
   display_name: string | null;
+  alias: string | null;
+  notes: string | null;
   history: HistoryEntry[];
   tags: TagSummary[];
 }
@@ -84,6 +87,13 @@ export interface PreviewResult {
 export interface CommitResult {
   import_id: number;
   counts: PreviewCounts;
+}
+
+// Phase 4.7 — Account mutation
+
+export interface SiteSummary {
+  id: number;
+  name: string;
 }
 
 // Phase 4.6 — Tags
