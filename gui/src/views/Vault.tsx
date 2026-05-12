@@ -3,6 +3,7 @@ import IconRail from "../components/IconRail";
 import AccountsTable from "../components/AccountsTable";
 import TagsSidebar from "../components/TagsSidebar";
 import BulkActionBar from "../components/BulkActionBar";
+import ManageTagsOverlay from "../components/ManageTagsOverlay";
 import PerSite from "./PerSite";
 import Import from "./Import";
 import { ToastProvider } from "../components/Toast";
@@ -23,7 +24,7 @@ export default function Vault({ onLock }: VaultProps) {
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
-  const [_manageOpen, setManageOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
 
   // Lifted from AccountsTable so BulkActionBar can read the same accounts array.
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
@@ -105,7 +106,16 @@ export default function Vault({ onLock }: VaultProps) {
                 />
               )}
             </div>
-            {/* ManageTagsOverlay slot — added in Task 9 */}
+            {manageOpen && (
+              <ManageTagsOverlay
+                onClose={() => setManageOpen(false)}
+                onLockedError={onLock}
+                onMutated={() => {
+                  setRefreshKey((k) => k + 1);
+                  setFilterTagIds([]); // Drop any filter that may now point at a renamed/deleted tag.
+                }}
+              />
+            )}
           </div>
         )}
         {view === "import" && (

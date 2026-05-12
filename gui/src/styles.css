@@ -1240,3 +1240,44 @@ select option {
   color: var(--error) !important;
 }
 .modal__btn--danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.per-site__tags-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px 0;
+}
+.per-site__add-tag {
+  background: transparent;
+  border: 1px dashed #3a3a44;
+  color: var(--text-1, #d0d0d8);
+  padding: 1px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 10px;
+}
+.per-site__add-tag:hover { color: var(--text-0); background: #2a2a32; }
+
+.modal--manage-tags { min-width: 420px; }
+.manage-tags__list { list-style: none; margin: 12px 0; padding: 0; max-height: 360px; overflow-y: auto; }
+.manage-tags__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid #2a2a32;
+  font-size: 12px;
+}
+.manage-tags__name { flex: 1; }
+.manage-tags__count { color: var(--text-1); font-size: 10px; }
+.manage-tags__row button {
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-1);
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.manage-tags__delete { color: var(--error) !important; border-color: #5a2a2a !important; }

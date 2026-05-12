@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import AttachmentsSection from "../components/AttachmentsSection";
 import PasswordCell from "../components/PasswordCell";
-import type { AccountDetail, GuiError } from "../types";
+import TagChip from "../components/TagChip";
+import TagPicker from "../components/TagPicker";
+import type { AccountDetail, GuiError, TagSummary } from "../types";
 
 interface PerSiteProps {
   accountId: number;
@@ -13,6 +15,7 @@ interface PerSiteProps {
 export default function PerSite({ accountId, onLockedError, onAccountDeleted }: PerSiteProps) {
   const [detail, setDetail] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const loadDetail = useCallback(() => {
     setDetail(null);
@@ -49,6 +52,36 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted }: 
     }
   };
 
+  const handleAddTag = async (chosen: TagSummary | { name: string; isNew: true }) => {
+    setAdding(false);
+    try {
+      let tagId: number;
+      if ("isNew" in chosen) {
+        const created = await api.createTag(chosen.name);
+        tagId = created.id;
+      } else {
+        tagId = chosen.id;
+      }
+      await api.assignTag(accountId, tagId);
+      loadDetail();
+    } catch (e) {
+      const err = e as GuiError;
+      if (err.kind === "Locked") onLockedError();
+      else setError(err.message ?? err.kind);
+    }
+  };
+
+  const handleRemoveTag = async (tagId: number) => {
+    try {
+      await api.unassignTag(accountId, tagId);
+      loadDetail();
+    } catch (e) {
+      const err = e as GuiError;
+      if (err.kind === "Locked") onLockedError();
+      else setError(err.message ?? err.kind);
+    }
+  };
+
   if (error) {
     return <div className="per-site__status per-site__status--error">{error}</div>;
   }
@@ -71,6 +104,21 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted }: 
           >
             Delete account
           </button>
+        </div>
+        <div className="per-site__tags-row">
+          {detail.tags?.map((t) => (
+            <TagChip key={t.id} tag={t} onRemove={() => handleRemoveTag(t.id)} />
+          ))}
+          {!adding ? (
+            <button className="per-site__add-tag" onClick={() => setAdding(true)}>+ Add tag</button>
+          ) : (
+            <TagPicker
+              onSelect={handleAddTag}
+              onCancel={() => setAdding(false)}
+              onLockedError={onLockedError}
+              placeholder="tag name…"
+            />
+          )}
         </div>
         <div className="per-site__meta">
           {[detail.site_url, detail.site_category, ...detail.site_abbreviations]
