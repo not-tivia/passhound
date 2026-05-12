@@ -756,7 +756,7 @@ select option {
    display_name additions (Phase 4.2)
    ============================================================================ */
 
-.accounts-table__display-name {
+.accounts-table__secondary {
   color: var(--text-3);
   font-size: 10px;
   margin-top: 2px;
@@ -773,4 +773,49 @@ select option {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+/* ============================================================================
+   Vault list customization (Phase 4.3): primary toggle + draggable columns
+   ============================================================================ */
+
+.accounts-table__searchbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.accounts-table__primary-toggle {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.accounts-table__primary-toggle:hover {
+  background: var(--border);
+  color: var(--text-0);
+}
+
+/* Draggable column headers */
+
+.accounts-table__th {
+  cursor: grab;
+  user-select: none;
+}
+
+.accounts-table__th:active {
+  cursor: grabbing;
+}
+
+.accounts-table__th--dragging {
+  opacity: 0.4;
+}
+
+.accounts-table__th--drag-over {
+  background: var(--selected) !important;
+  border-bottom: 2px solid var(--text-0) !important;
 }
