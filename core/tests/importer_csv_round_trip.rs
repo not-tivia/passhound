@@ -31,7 +31,7 @@ Amazon,amazon.com,chris@example.com,Bezos$Buy1,\n",
     let all_sites = sites::list(&v).unwrap();
     assert_eq!(all_sites.len(), 2);
     let runescape = all_sites.iter().find(|s| s.name == "RuneScape").unwrap();
-    let accs = accounts::list_for_site(&v, runescape.id).unwrap();
+    let accs = accounts::list_for_site(&v, runescape.id, &[]).unwrap();
     assert_eq!(accs.len(), 1);
     let pt = passwords::current_plaintext(&v, accs[0].id).unwrap().unwrap();
     assert_eq!(pt.as_str(), "Fluffy!2014");

@@ -13,7 +13,7 @@ pub fn run(path: &Path) -> Result<()> {
 
     let mut printed_any = false;
     for site in sites::list(&vault)? {
-        let accs = accounts::list_for_site(&vault, site.id)?;
+        let accs = accounts::list_for_site(&vault, site.id, &[])?;
         if accs.is_empty() { continue; }
         printed_any = true;
         println!("{} [{}]", site.name, site.category.as_deref().unwrap_or("-"));

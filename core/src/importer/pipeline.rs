@@ -56,7 +56,7 @@ pub fn preview(vault: &Vault, entries: Vec<ImportEntry>) -> Result<Preview> {
         let (classification, site_id, account_id) = match matched_site {
             None => (Classification::New, None, None),
             Some(site) => {
-                let accs = accounts::list_for_site(vault, site.id)?;
+                let accs = accounts::list_for_site(vault, site.id, &[])?;
                 let target_user = entry.username.as_deref().unwrap_or("");
                 let matched_account = accs.iter().find(|a| {
                     a.username.as_deref().unwrap_or("") == target_user

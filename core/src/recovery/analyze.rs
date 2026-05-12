@@ -123,7 +123,7 @@ fn decrypt_all_history(vault: &Vault) -> Result<Vec<(DateTime<Utc>, Zeroizing<St
     let sites = sites::list(vault)?;
     let mut out: Vec<(DateTime<Utc>, Zeroizing<String>)> = Vec::new();
     for s in sites {
-        let accs = accounts::list_for_site(vault, s.id)?;
+        let accs = accounts::list_for_site(vault, s.id, &[])?;
         for a in accs {
             let history = passwords::list_history(vault, a.id)?;
             for rec in history {

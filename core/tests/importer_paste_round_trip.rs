@@ -30,7 +30,7 @@ password: Bezos$Buy1
     let all_sites = sites::list(&v).unwrap();
     assert_eq!(all_sites.len(), 2);
     let amazon = all_sites.iter().find(|s| s.name == "Amazon").unwrap();
-    let accs = accounts::list_for_site(&v, amazon.id).unwrap();
+    let accs = accounts::list_for_site(&v, amazon.id, &[]).unwrap();
     let pt = passwords::current_plaintext(&v, accs[0].id).unwrap().unwrap();
     assert_eq!(pt.as_str(), "Bezos$Buy1");
 }
