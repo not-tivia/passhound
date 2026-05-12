@@ -531,6 +531,141 @@ fn read_csv_headers(path: &std::path::Path) -> Result<Vec<String>, GuiError> {
 }
 
 // ============================================================================
+// Attachments (Phase 4.4)
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct AttachmentSummaryArgs {
+    pub id: i64,
+    pub account_id: i64,
+    pub filename: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    pub created_at: String,
+}
+
+impl From<passhound_core::repo::attachments::AttachmentSummary> for AttachmentSummaryArgs {
+    fn from(s: passhound_core::repo::attachments::AttachmentSummary) -> Self {
+        AttachmentSummaryArgs {
+            id: s.id,
+            account_id: s.account_id,
+            filename: s.filename,
+            mime_type: s.mime_type,
+            size_bytes: s.size_bytes,
+            created_at: s.created_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct AttachmentReadResult {
+    pub id: i64,
+    pub filename: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    /// Base64-encoded plaintext bytes.
+    pub bytes_base64: String,
+}
+
+#[tauri::command]
+pub fn list_attachments(
+    state: State<'_, VaultState>,
+    account_id: i64,
+) -> Result<Vec<AttachmentSummaryArgs>, GuiError> {
+    list_attachments_inner(&state, account_id)
+}
+
+pub fn list_attachments_inner(
+    state: &VaultState,
+    account_id: i64,
+) -> Result<Vec<AttachmentSummaryArgs>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let list = passhound_core::repo::attachments::list_for_account(v, account_id)?;
+    Ok(list.into_iter().map(AttachmentSummaryArgs::from).collect())
+}
+
+#[tauri::command]
+pub fn attach_file(
+    state: State<'_, VaultState>,
+    account_id: i64,
+    filename: String,
+    mime_type: String,
+    bytes_base64: String,
+) -> Result<AttachmentSummaryArgs, GuiError> {
+    attach_file_inner(&state, account_id, &filename, &mime_type, &bytes_base64)
+}
+
+pub fn attach_file_inner(
+    state: &VaultState,
+    account_id: i64,
+    filename: &str,
+    mime_type: &str,
+    bytes_base64: &str,
+) -> Result<AttachmentSummaryArgs, GuiError> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let bytes = STANDARD
+        .decode(bytes_base64)
+        .map_err(|e| GuiError::InvalidInput(format!("invalid base64: {e}")))?;
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let summary = passhound_core::repo::attachments::insert(
+        v,
+        passhound_core::repo::attachments::NewAttachment {
+            account_id,
+            filename,
+            mime_type,
+            bytes: &bytes,
+        },
+    )?;
+    Ok(AttachmentSummaryArgs::from(summary))
+}
+
+#[tauri::command]
+pub fn read_attachment(
+    state: State<'_, VaultState>,
+    attachment_id: i64,
+) -> Result<AttachmentReadResult, GuiError> {
+    read_attachment_inner(&state, attachment_id)
+}
+
+pub fn read_attachment_inner(
+    state: &VaultState,
+    attachment_id: i64,
+) -> Result<AttachmentReadResult, GuiError> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let (summary, plaintext) = passhound_core::repo::attachments::decrypt(v, attachment_id)?;
+    let bytes_base64 = STANDARD.encode(plaintext.as_slice());
+    Ok(AttachmentReadResult {
+        id: summary.id,
+        filename: summary.filename,
+        mime_type: summary.mime_type,
+        size_bytes: summary.size_bytes,
+        bytes_base64,
+    })
+}
+
+#[tauri::command]
+pub fn delete_attachment(
+    state: State<'_, VaultState>,
+    attachment_id: i64,
+) -> Result<(), GuiError> {
+    delete_attachment_inner(&state, attachment_id)
+}
+
+pub fn delete_attachment_inner(
+    state: &VaultState,
+    attachment_id: i64,
+) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::attachments::delete(v, attachment_id)?;
+    Ok(())
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -767,5 +902,97 @@ mod tests {
         let list = list_accounts_inner(&state, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].site_name, "RuneScape");
+    }
+
+    #[test]
+    fn attach_file_round_trips_bytes() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let account_id = {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "S".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            a.id
+        };
+
+        let original = b"hello world binary \x00\xff\x01\xfe";
+        let encoded = STANDARD.encode(original);
+        let summary = attach_file_inner(
+            &state,
+            account_id,
+            "hello.bin",
+            "application/octet-stream",
+            &encoded,
+        ).unwrap();
+        assert_eq!(summary.filename, "hello.bin");
+        assert_eq!(summary.size_bytes, original.len() as i64);
+
+        let read = read_attachment_inner(&state, summary.id).unwrap();
+        let decoded = STANDARD.decode(&read.bytes_base64).unwrap();
+        assert_eq!(decoded.as_slice(), original);
+    }
+
+    #[test]
+    fn list_attachments_returns_inserted_files() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let account_id = {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "S".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            a.id
+        };
+
+        attach_file_inner(&state, account_id, "a.png", "image/png", &STANDARD.encode(b"pngdata")).unwrap();
+        attach_file_inner(&state, account_id, "b.pdf", "application/pdf", &STANDARD.encode(b"pdfdata")).unwrap();
+
+        let list = list_attachments_inner(&state, account_id).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].filename, "a.png");
+        assert_eq!(list[0].mime_type, "image/png");
+        assert_eq!(list[1].filename, "b.pdf");
+    }
+
+    #[test]
+    fn delete_attachment_removes_file() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let account_id = {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "S".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            a.id
+        };
+
+        let summary = attach_file_inner(
+            &state, account_id, "a.txt", "text/plain",
+            &STANDARD.encode(b"hello"),
+        ).unwrap();
+
+        delete_attachment_inner(&state, summary.id).unwrap();
+
+        let list = list_attachments_inner(&state, account_id).unwrap();
+        assert!(list.is_empty(), "expected empty list after delete; got {list:?}");
     }
 }

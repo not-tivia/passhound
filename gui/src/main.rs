@@ -20,6 +20,10 @@ fn main() {
             copy_to_clipboard,
             import_csv_dry_run,
             import_csv_commit,
+            list_attachments,
+            attach_file,
+            read_attachment,
+            delete_attachment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
