@@ -6,6 +6,7 @@ use crate::error::GuiError;
 use crate::state::VaultState;
 use passhound_core::{repo, Vault};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::State;
 use zeroize::Zeroizing;
@@ -98,6 +99,19 @@ pub fn vault_lock_inner(state: &VaultState) -> Result<(), GuiError> {
 // Read commands
 // ============================================================================
 
+#[derive(Serialize, Debug, Clone)]
+pub struct TagSummary {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct TagWithCount {
+    pub id: i64,
+    pub name: String,
+    pub account_count: i64,
+}
+
 #[derive(Serialize)]
 pub struct AccountSummary {
     pub id: i64,
@@ -106,19 +120,23 @@ pub struct AccountSummary {
     pub display_name: Option<String>,
     pub last_changed: Option<String>,
     pub category: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<TagSummary>,
 }
 
 #[tauri::command]
 pub fn list_accounts(
     state: State<'_, VaultState>,
     filter: Option<String>,
+    tag_ids: Option<Vec<i64>>,
 ) -> Result<Vec<AccountSummary>, GuiError> {
-    list_accounts_inner(&state, filter.as_deref())
+    list_accounts_inner(&state, filter.as_deref(), tag_ids)
 }
 
 pub fn list_accounts_inner(
     state: &VaultState,
     filter: Option<&str>,
+    tag_ids: Option<Vec<i64>>,
 ) -> Result<Vec<AccountSummary>, GuiError> {
     // TODO(perf): the guard is held across the SQL / decrypt call below —
     // acceptable for the MVP single-user case but a `vault_lock` IPC would
@@ -135,27 +153,66 @@ pub fn list_accounts_inner(
     let needle = filter
         .map(|s| s.to_lowercase())
         .filter(|s| !s.is_empty());
-    let sql = "
-        SELECT a.id, s.name, a.username, a.display_name, s.category,
-               (SELECT MAX(ph.created_at) FROM password_history ph WHERE ph.account_id = a.id) AS last_changed
-        FROM accounts a
-        JOIN sites s ON s.id = a.site_id
-        ORDER BY last_changed DESC NULLS LAST, s.name ASC
-    ";
-    let mut stmt = v.conn().prepare(sql)?;
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, Option<String>>(2)?,
-            r.get::<_, Option<String>>(3)?,
-            r.get::<_, Option<String>>(4)?,
-            r.get::<_, Option<String>>(5)?,
-        ))
-    })?;
+    let tag_filter = tag_ids.as_deref().unwrap_or(&[]);
+    // Build the base SQL with optional tag join/filter.
+    let sql = if tag_filter.is_empty() {
+        "SELECT a.id, s.name, a.username, a.display_name, s.category,
+                (SELECT MAX(ph.created_at) FROM password_history ph WHERE ph.account_id = a.id) AS last_changed
+         FROM accounts a
+         JOIN sites s ON s.id = a.site_id
+         ORDER BY last_changed DESC NULLS LAST, s.name ASC".to_string()
+    } else {
+        let placeholders = tag_filter
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "SELECT a.id, s.name, a.username, a.display_name, s.category,
+                    (SELECT MAX(ph.created_at) FROM password_history ph WHERE ph.account_id = a.id) AS last_changed
+             FROM accounts a
+             JOIN sites s ON s.id = a.site_id
+             JOIN account_tags at ON at.account_id = a.id
+             WHERE at.tag_id IN ({placeholders})
+             GROUP BY a.id
+             HAVING COUNT(DISTINCT at.tag_id) = ?{count_param}
+             ORDER BY last_changed DESC NULLS LAST, s.name ASC",
+            placeholders = placeholders,
+            count_param = tag_filter.len() + 1,
+        )
+    };
+    let mut stmt = v.conn().prepare(&sql)?;
+    let rows: Vec<(i64, String, Option<String>, Option<String>, Option<String>, Option<String>)> =
+        if tag_filter.is_empty() {
+            stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            })?.collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            let mut params_vec: Vec<&dyn rusqlite::ToSql> =
+                tag_filter.iter().map(|x| x as &dyn rusqlite::ToSql).collect();
+            let count: i64 = tag_filter.len() as i64;
+            params_vec.push(&count);
+            stmt.query_map(params_vec.as_slice(), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            })?.collect::<rusqlite::Result<Vec<_>>>()?
+        };
     let mut out: Vec<AccountSummary> = Vec::new();
-    for row in rows {
-        let (id, site_name, username, display_name, category, last_changed) = row?;
+    for (id, site_name, username, display_name, category, last_changed) in rows {
         if let Some(needle) = &needle {
             let hay = format!(
                 "{} {} {} {}",
@@ -175,7 +232,16 @@ pub fn list_accounts_inner(
             display_name,
             last_changed,
             category,
+            tags: Vec::new(),
         });
+    }
+    // Merge tags via a single join query over all collected account ids.
+    let account_ids: Vec<i64> = out.iter().map(|a| a.id).collect();
+    let mut tags_map = fetch_tags_by_account(v, &account_ids)?;
+    for summary in &mut out {
+        if let Some(tags) = tags_map.remove(&summary.id) {
+            summary.tags = tags;
+        }
     }
     Ok(out)
 }
@@ -190,6 +256,8 @@ pub struct AccountDetail {
     pub username: Option<String>,
     pub display_name: Option<String>,
     pub history: Vec<HistoryEntry>,
+    #[serde(default)]
+    pub tags: Vec<TagSummary>,
 }
 
 #[derive(Serialize)]
@@ -232,6 +300,11 @@ pub fn get_account_inner(state: &VaultState, id: i64) -> Result<AccountDetail, G
             notes: r.notes,
         })
         .collect();
+    let raw_tags = repo::account_tags::list_for_account(v, id)?;
+    let tags: Vec<TagSummary> = raw_tags
+        .into_iter()
+        .map(|t| TagSummary { id: t.id, name: t.name })
+        .collect();
     Ok(AccountDetail {
         id: acct.id,
         site_name: site.name,
@@ -241,6 +314,7 @@ pub fn get_account_inner(state: &VaultState, id: i64) -> Result<AccountDetail, G
         username: acct.username,
         display_name: acct.display_name,
         history,
+        tags,
     })
 }
 
@@ -293,6 +367,43 @@ pub fn copy_to_clipboard(
 
 fn poisoned<T>(_: std::sync::PoisonError<T>) -> GuiError {
     GuiError::Internal("vault state mutex poisoned".into())
+}
+
+/// Single join query that fetches all tags for a set of account ids, returning
+/// a map from account_id to its tag list (ordered by LOWER(tag.name)).
+fn fetch_tags_by_account(v: &Vault, account_ids: &[i64]) -> Result<HashMap<i64, Vec<TagSummary>>, GuiError> {
+    if account_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = (1..=account_ids.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT at.account_id, t.id, t.name
+         FROM account_tags at
+         JOIN tags t ON t.id = at.tag_id
+         WHERE at.account_id IN ({placeholders})
+         ORDER BY at.account_id, LOWER(t.name)"
+    );
+    let mut stmt = v.conn().prepare(&sql)?;
+    let params: Vec<&dyn rusqlite::ToSql> =
+        account_ids.iter().map(|x| x as &dyn rusqlite::ToSql).collect();
+    let mut map: HashMap<i64, Vec<TagSummary>> = HashMap::new();
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            TagSummary {
+                id: row.get(1)?,
+                name: row.get(2)?,
+            },
+        ))
+    })?;
+    for r in rows {
+        let (aid, ts) = r?;
+        map.entry(aid).or_default().push(ts);
+    }
+    Ok(map)
 }
 
 // ============================================================================
@@ -690,6 +801,200 @@ pub fn delete_password_inner(state: &VaultState, history_id: i64) -> Result<(), 
 }
 
 // ============================================================================
+// Tags (Phase 4.6)
+// ============================================================================
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, VaultState>) -> Result<Vec<TagWithCount>, GuiError> {
+    list_tags_inner(&state)
+}
+
+pub fn list_tags_inner(state: &VaultState) -> Result<Vec<TagWithCount>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let rows = passhound_core::repo::tags::list_with_counts(v)?;
+    Ok(rows
+        .into_iter()
+        .map(|r| TagWithCount {
+            id: r.id,
+            name: r.name,
+            account_count: r.account_count,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn create_tag(state: State<'_, VaultState>, name: String) -> Result<TagSummary, GuiError> {
+    create_tag_inner(&state, &name)
+}
+
+pub fn create_tag_inner(state: &VaultState, name: &str) -> Result<TagSummary, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let trimmed = name.trim();
+    if let Some(existing) = passhound_core::repo::tags::find_by_name(v, trimmed)? {
+        return Ok(TagSummary { id: existing.id, name: existing.name });
+    }
+    let created = passhound_core::repo::tags::create(
+        v,
+        passhound_core::repo::tags::NewTag {
+            name: trimmed,
+            created_at: None,
+        },
+    )?;
+    Ok(TagSummary { id: created.id, name: created.name })
+}
+
+#[tauri::command]
+pub fn rename_tag(
+    state: State<'_, VaultState>,
+    tag_id: i64,
+    new_name: String,
+) -> Result<(), GuiError> {
+    rename_tag_inner(&state, tag_id, &new_name)
+}
+
+pub fn rename_tag_inner(state: &VaultState, tag_id: i64, new_name: &str) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::tags::rename(v, tag_id, new_name)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_tag(state: State<'_, VaultState>, tag_id: i64) -> Result<(), GuiError> {
+    delete_tag_inner(&state, tag_id)
+}
+
+pub fn delete_tag_inner(state: &VaultState, tag_id: i64) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::tags::delete(v, tag_id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_account_tags(
+    state: State<'_, VaultState>,
+    account_id: i64,
+) -> Result<Vec<TagSummary>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let tags = passhound_core::repo::account_tags::list_for_account(v, account_id)?;
+    Ok(tags
+        .into_iter()
+        .map(|t| TagSummary { id: t.id, name: t.name })
+        .collect())
+}
+
+#[tauri::command]
+pub fn assign_tag(
+    state: State<'_, VaultState>,
+    account_id: i64,
+    tag_id: i64,
+) -> Result<(), GuiError> {
+    assign_tag_inner(&state, account_id, tag_id)
+}
+
+pub fn assign_tag_inner(
+    state: &VaultState,
+    account_id: i64,
+    tag_id: i64,
+) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::account_tags::assign(v, account_id, tag_id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn unassign_tag(
+    state: State<'_, VaultState>,
+    account_id: i64,
+    tag_id: i64,
+) -> Result<(), GuiError> {
+    unassign_tag_inner(&state, account_id, tag_id)
+}
+
+pub fn unassign_tag_inner(
+    state: &VaultState,
+    account_id: i64,
+    tag_id: i64,
+) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::account_tags::unassign(v, account_id, tag_id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn bulk_assign_tag(
+    state: State<'_, VaultState>,
+    account_ids: Vec<i64>,
+    tag_id: i64,
+) -> Result<usize, GuiError> {
+    bulk_assign_tag_inner(&state, &account_ids, tag_id)
+}
+
+pub fn bulk_assign_tag_inner(
+    state: &VaultState,
+    account_ids: &[i64],
+    tag_id: i64,
+) -> Result<usize, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let n = passhound_core::repo::account_tags::bulk_assign(v, account_ids, tag_id)?;
+    Ok(n)
+}
+
+#[tauri::command]
+pub fn bulk_unassign_tag(
+    state: State<'_, VaultState>,
+    account_ids: Vec<i64>,
+    tag_id: i64,
+) -> Result<usize, GuiError> {
+    bulk_unassign_tag_inner(&state, &account_ids, tag_id)
+}
+
+pub fn bulk_unassign_tag_inner(
+    state: &VaultState,
+    account_ids: &[i64],
+    tag_id: i64,
+) -> Result<usize, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let n = passhound_core::repo::account_tags::bulk_unassign(v, account_ids, tag_id)?;
+    Ok(n)
+}
+
+#[tauri::command]
+pub fn bulk_delete_accounts(
+    state: State<'_, VaultState>,
+    account_ids: Vec<i64>,
+) -> Result<usize, GuiError> {
+    bulk_delete_accounts_inner(&state, &account_ids)
+}
+
+pub fn bulk_delete_accounts_inner(
+    state: &VaultState,
+    account_ids: &[i64],
+) -> Result<usize, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let mut count = 0usize;
+    let tx = v.conn().unchecked_transaction()?;
+    for &id in account_ids {
+        match passhound_core::repo::accounts::delete(v, id) {
+            Ok(()) => count += 1,
+            Err(passhound_core::error::Error::NotFound) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    tx.commit()?;
+    Ok(count)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -713,14 +1018,14 @@ mod tests {
         vault_create_inner(&state, &path, b"hunter2").unwrap();
         assert!(vault_exists_inner(&path).unwrap());
         // Empty vault — listing returns no accounts
-        let list = list_accounts_inner(&state, None).unwrap();
+        let list = list_accounts_inner(&state, None, None).unwrap();
         assert!(list.is_empty());
         // Lock
         vault_lock_inner(&state).unwrap();
-        assert!(matches!(list_accounts_inner(&state, None), Err(GuiError::Locked)));
+        assert!(matches!(list_accounts_inner(&state, None, None), Err(GuiError::Locked)));
         // Re-unlock
         vault_unlock_inner(&state, &path, b"hunter2").unwrap();
-        let list = list_accounts_inner(&state, None).unwrap();
+        let list = list_accounts_inner(&state, None, None).unwrap();
         assert!(list.is_empty());
     }
 
@@ -755,7 +1060,7 @@ mod tests {
                 created_at: None,
             }).unwrap();
         }
-        let list = list_accounts_inner(&state, None).unwrap();
+        let list = list_accounts_inner(&state, None, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].site_name, "Reddit");
         assert_eq!(list[0].username.as_deref(), Some("chris"));
@@ -763,9 +1068,9 @@ mod tests {
         assert!(list[0].last_changed.is_some());
         assert_eq!(list[0].display_name.as_deref(), Some("MaxedNoob"));
         // Filter
-        let filtered = list_accounts_inner(&state, Some("redd")).unwrap();
+        let filtered = list_accounts_inner(&state, Some("redd"), None).unwrap();
         assert_eq!(filtered.len(), 1);
-        let unfiltered = list_accounts_inner(&state, Some("zzz_no_match_zzz")).unwrap();
+        let unfiltered = list_accounts_inner(&state, Some("zzz_no_match_zzz"), None).unwrap();
         assert_eq!(unfiltered.len(), 0);
     }
 
@@ -923,7 +1228,7 @@ mod tests {
         assert!(r.import_id > 0);
 
         // Verify the row is in the vault now.
-        let list = list_accounts_inner(&state, None).unwrap();
+        let list = list_accounts_inner(&state, None, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].site_name, "RuneScape");
     }
@@ -1055,13 +1360,13 @@ mod tests {
         ).unwrap();
 
         // Sanity: account is present before delete.
-        let before = list_accounts_inner(&state, None).unwrap();
+        let before = list_accounts_inner(&state, None, None).unwrap();
         assert_eq!(before.len(), 1);
 
         delete_account_inner(&state, account_id).unwrap();
 
         // Account is gone.
-        let after = list_accounts_inner(&state, None).unwrap();
+        let after = list_accounts_inner(&state, None, None).unwrap();
         assert!(after.is_empty(), "expected no accounts after delete; got {} rows", after.len());
 
         // Attachment cascaded away.
@@ -1104,5 +1409,91 @@ mod tests {
         // One history row remains.
         let after = get_account_inner(&state, account_id).unwrap();
         assert_eq!(after.history.len(), 1, "expected 1 history row after deleting one; got {:?}", after.history.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 4.6 tag tests
+    // -----------------------------------------------------------------------
+
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static COUNTER: AtomicI64 = AtomicI64::new(0);
+
+    /// Helper: insert a site + account and return the account id.
+    fn seed_account(state: &VaultState) -> i64 {
+        let guard = state.vault.lock().unwrap();
+        let v = guard.as_ref().unwrap();
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let s = sites::create(v, sites::NewSite {
+            name: format!("SeedSite{n}"),
+            ..Default::default()
+        }).unwrap();
+        accounts::create(v, accounts::NewAccount {
+            site_id: s.id,
+            ..Default::default()
+        }).unwrap().id
+    }
+
+    #[test]
+    fn create_tag_and_list_tags_round_trip() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let t = create_tag_inner(&state, "throwaway").unwrap();
+        let list = list_tags_inner(&state).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, t.id);
+        assert_eq!(list[0].account_count, 0);
+    }
+
+    #[test]
+    fn assign_tag_then_get_account_includes_tag() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let account_id = seed_account(&state);
+        let tag = create_tag_inner(&state, "main").unwrap();
+        assign_tag_inner(&state, account_id, tag.id).unwrap();
+        let detail = get_account_inner(&state, account_id).unwrap();
+        assert_eq!(detail.tags.len(), 1);
+        assert_eq!(detail.tags[0].name, "main");
+    }
+
+    #[test]
+    fn list_accounts_filters_by_tag_ids() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let a1 = seed_account(&state);
+        let _a2 = seed_account(&state);
+        let tag = create_tag_inner(&state, "foo").unwrap();
+        assign_tag_inner(&state, a1, tag.id).unwrap();
+        let filtered = list_accounts_inner(&state, None, Some(vec![tag.id])).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, a1);
+    }
+
+    #[test]
+    fn bulk_assign_tag_inserts_for_all() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let ids = vec![seed_account(&state), seed_account(&state), seed_account(&state)];
+        let tag = create_tag_inner(&state, "bulk").unwrap();
+        let n = bulk_assign_tag_inner(&state, &ids, tag.id).unwrap();
+        assert_eq!(n, 3);
+    }
+
+    #[test]
+    fn bulk_delete_accounts_cascades_everything() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let ids = vec![seed_account(&state), seed_account(&state)];
+        let tag = create_tag_inner(&state, "t").unwrap();
+        bulk_assign_tag_inner(&state, &ids, tag.id).unwrap();
+        let n = bulk_delete_accounts_inner(&state, &ids).unwrap();
+        assert_eq!(n, 2);
+        let remaining = list_accounts_inner(&state, None, None).unwrap();
+        assert!(remaining.is_empty());
     }
 }

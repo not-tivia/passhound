@@ -26,6 +26,16 @@ fn main() {
             delete_attachment,
             delete_account,
             delete_password,
+            list_tags,
+            create_tag,
+            rename_tag,
+            delete_tag,
+            list_account_tags,
+            assign_tag,
+            unassign_tag,
+            bulk_assign_tag,
+            bulk_unassign_tag,
+            bulk_delete_accounts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
