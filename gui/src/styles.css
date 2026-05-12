@@ -42,6 +42,29 @@ input {
   font-size: inherit;
 }
 
+/* Force select elements to inherit the dark theme. Without these resets the
+   OS native control bleeds through on Linux/WSL — light text on white. */
+select {
+  font-family: inherit;
+  font-size: inherit;
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 18px;
+  /* tiny chevron via SVG data URI, color = --text-2 (#888) */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'><path fill='%23888' d='M0 0l4 6 4-6z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+
+select option {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
 /* ============================================================================
    Lock screen
    ============================================================================ */
