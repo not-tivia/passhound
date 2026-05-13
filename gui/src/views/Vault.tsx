@@ -4,6 +4,7 @@ import AccountsTable from "../components/AccountsTable";
 import TagsSidebar from "../components/TagsSidebar";
 import BulkActionBar from "../components/BulkActionBar";
 import ManageTagsOverlay from "../components/ManageTagsOverlay";
+import AccountFormModal from "../components/AccountFormModal";
 import PerSite from "./PerSite";
 import Import from "./Import";
 import { ToastProvider } from "../components/Toast";
@@ -25,6 +26,7 @@ export default function Vault({ onLock }: VaultProps) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
   const [manageOpen, setManageOpen] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
 
   // Lifted from AccountsTable so BulkActionBar can read the same accounts array.
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
@@ -74,6 +76,9 @@ export default function Vault({ onLock }: VaultProps) {
               refreshKey={refreshKey}
             />
             <div className="vault-accounts">
+              <button className="vault__add-account-btn" onClick={() => setAddingAccount(true)}>
+                + Add account
+              </button>
               <AccountsTable
                 accounts={accounts}
                 search={search}
@@ -106,6 +111,18 @@ export default function Vault({ onLock }: VaultProps) {
                 />
               )}
             </div>
+            {addingAccount && (
+              <AccountFormModal
+                mode="add"
+                onClose={() => setAddingAccount(false)}
+                onSaved={(id) => {
+                  setAddingAccount(false);
+                  setRefreshKey((k) => k + 1);
+                  setSelectedId(id);
+                }}
+                onLockedError={onLock}
+              />
+            )}
             {manageOpen && (
               <ManageTagsOverlay
                 onClose={() => setManageOpen(false)}

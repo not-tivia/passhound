@@ -7,9 +7,10 @@ interface PasswordCellProps {
   historyId: number;
   onLockedError: () => void;
   onDelete: () => void;
+  onPromote?: () => void;
 }
 
-export default function PasswordCell({ historyId, onLockedError, onDelete }: PasswordCellProps) {
+export default function PasswordCell({ historyId, onLockedError, onDelete, onPromote }: PasswordCellProps) {
   const [revealed, setRevealed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -76,6 +77,17 @@ export default function PasswordCell({ historyId, onLockedError, onDelete }: Pas
       <button className="pwd-cell__btn" onClick={handleCopy} disabled={busy}>
         copy
       </button>
+      {onPromote && (
+        <button
+          className="pwd-cell__btn pwd-cell__btn--promote"
+          onClick={onPromote}
+          disabled={busy}
+          aria-label="Set as current password"
+          title="Set as current password"
+        >
+          {"↑"}
+        </button>
+      )}
       <button
         className="pwd-cell__btn pwd-cell__btn--delete"
         onClick={handleDelete}

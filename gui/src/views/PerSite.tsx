@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import AccountFormModal from "../components/AccountFormModal";
+import AddPasswordInput from "../components/AddPasswordInput";
 import AttachmentsSection from "../components/AttachmentsSection";
 import PasswordCell from "../components/PasswordCell";
 import TagChip from "../components/TagChip";
@@ -16,6 +18,8 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted }: 
   const [detail, setDetail] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [addingPassword, setAddingPassword] = useState(false);
 
   const loadDetail = useCallback(() => {
     setDetail(null);
@@ -98,6 +102,13 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted }: 
         <div className="per-site__title-row">
           <div className="per-site__title">{detail.site_name}</div>
           <button
+            className="per-site__edit-account"
+            onClick={() => setEditing(true)}
+            title="Edit account metadata"
+          >
+            Edit
+          </button>
+          <button
             className="per-site__delete-account"
             onClick={handleDeleteAccount}
             title="Delete this account permanently"
@@ -137,14 +148,23 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted }: 
       </div>
 
       <div className="per-site__body">
-        {current && (
-          <>
-            <div className="per-site__section-label">Current</div>
-            <div className="per-site__entry">
-              <PasswordCell historyId={current.id} onLockedError={onLockedError} onDelete={loadDetail} />
-              <div className="per-site__date">{current.created_at.slice(0, 10)}</div>
-            </div>
-          </>
+        <div className="per-site__section-label">Current</div>
+        {current ? (
+          <div className="per-site__entry">
+            <PasswordCell historyId={current.id} onLockedError={onLockedError} onDelete={loadDetail} />
+            <div className="per-site__date">{current.created_at.slice(0, 10)}</div>
+          </div>
+        ) : addingPassword ? (
+          <AddPasswordInput
+            accountId={accountId}
+            onSave={() => { setAddingPassword(false); loadDetail(); }}
+            onCancel={() => setAddingPassword(false)}
+            onLockedError={onLockedError}
+          />
+        ) : (
+          <button className="account-form__add-btn" onClick={() => setAddingPassword(true)}>
+            + Add password
+          </button>
         )}
 
         <div className="per-site__section-label">
@@ -155,12 +175,43 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted }: 
         )}
         {past.map((h) => (
           <div className="per-site__entry per-site__entry--past" key={h.id}>
-            <PasswordCell historyId={h.id} onLockedError={onLockedError} onDelete={loadDetail} />
+            <PasswordCell
+              historyId={h.id}
+              onLockedError={onLockedError}
+              onDelete={loadDetail}
+              onPromote={async () => {
+                try {
+                  await api.promotePassword(h.id);
+                  loadDetail();
+                } catch (e) {
+                  const err = e as GuiError;
+                  if (err.kind === "Locked") onLockedError();
+                  else setError(err.message ?? err.kind);
+                }
+              }}
+            />
             <div className="per-site__date">{h.created_at.slice(0, 10)} · {h.source}</div>
           </div>
         ))}
         <AttachmentsSection accountId={detail.id} />
       </div>
+      {editing && (
+        <AccountFormModal
+          mode="edit"
+          initial={{
+            id: detail.id,
+            site_id: detail.site_id,
+            site_name: detail.site_name,
+            username: detail.username,
+            display_name: detail.display_name,
+            alias: detail.alias,
+            notes: detail.notes,
+          }}
+          onClose={() => setEditing(false)}
+          onSaved={() => { setEditing(false); loadDetail(); }}
+          onLockedError={onLockedError}
+        />
+      )}
     </div>
   );
 }
