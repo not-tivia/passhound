@@ -1401,7 +1401,7 @@ select option {
   letter-spacing: 0.05em;
   margin-top: 8px;
 }
-.recovery-filters__label:first-of-type { margin-top: 0; }
+.recovery-filters > .recovery-filters__label:first-child { margin-top: 0; }
 .recovery-filters__input {
   background: #14141a;
   border: 1px solid #3a3a44;
