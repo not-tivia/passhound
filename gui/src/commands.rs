@@ -1940,9 +1940,17 @@ mod tests {
         assert!(!result.is_empty(), "recovery should produce candidates");
         for (i, c) in result.iter().enumerate() {
             assert_eq!(c.rank, i + 1, "rank should be 1-indexed and sequential");
-            assert!(c.score >= 0.0 && c.score <= 2.0, "score in expected range: {}", c.score);
+            assert!(c.score >= 0.0 && c.score <= 1.6, "score in expected range: {}", c.score);
             assert!(!c.password.is_empty(), "password non-empty");
-            // Provenance may be empty for some candidates; just assert the shape is intact.
+        }
+
+        // At least one candidate should carry provenance — verifies that the
+        // RuleId -> RuleTag mapping in recover_candidates_inner actually fires
+        // and produces non-empty tag/name strings.
+        let with_prov = result.iter().find(|c| !c.provenance.is_empty()).expect("at least one candidate should have provenance");
+        for r in &with_prov.provenance {
+            assert!(!r.tag.is_empty(), "RuleTag.tag should be non-empty");
+            assert!(!r.name.is_empty(), "RuleTag.name should be non-empty");
         }
     }
 
