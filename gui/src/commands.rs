@@ -1171,6 +1171,111 @@ pub fn bulk_delete_accounts_inner(
     Ok(count)
 }
 
+// =================================================================
+// Phase 4.8 — Recovery
+// =================================================================
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverFilters {
+    pub site: Option<String>,
+    pub account: Option<String>,
+    pub era: Option<String>,
+    pub hint: Option<String>,
+    pub limit: usize,
+    pub min_length: Option<usize>,
+    pub require_symbol: bool,
+    pub require_digit: bool,
+}
+
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct RuleTag {
+    pub tag: String,
+    pub name: String,
+}
+
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct CandidateView {
+    pub rank: usize,
+    pub score: f32,
+    pub password: String,
+    pub provenance: Vec<RuleTag>,
+}
+
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct EraSummary {
+    pub id: i64,
+    pub name: String,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+}
+
+#[tauri::command]
+pub fn recover_candidates(
+    state: State<'_, VaultState>,
+    filters: RecoverFilters,
+) -> Result<Vec<CandidateView>, GuiError> {
+    recover_candidates_inner(&state, &filters)
+}
+
+pub fn recover_candidates_inner(
+    state: &VaultState,
+    filters: &RecoverFilters,
+) -> Result<Vec<CandidateView>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+
+    let cfg = passhound_core::RecoverConfig {
+        site: filters.site.clone(),
+        account: filters.account.clone(),
+        era_name: filters.era.clone(),
+        hint: filters.hint.clone(),
+        limit: filters.limit,
+        min_length: filters.min_length,
+        require_symbol: filters.require_symbol,
+        require_digit: filters.require_digit,
+    };
+
+    let candidates = passhound_core::recover(v, cfg)?;
+    Ok(candidates
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| CandidateView {
+            rank: i + 1,
+            score: c.score,
+            password: c.password.to_string(),
+            provenance: c
+                .provenance
+                .iter()
+                .map(|r| RuleTag {
+                    tag: r.tag().to_string(),
+                    name: r.name().to_string(),
+                })
+                .collect(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn list_eras(state: State<'_, VaultState>) -> Result<Vec<EraSummary>, GuiError> {
+    list_eras_inner(&state)
+}
+
+pub fn list_eras_inner(state: &VaultState) -> Result<Vec<EraSummary>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let eras = passhound_core::repo::eras::list(v)?;
+    Ok(eras
+        .into_iter()
+        .map(|e| EraSummary {
+            id: e.id,
+            name: e.name,
+            start_date: e.start_date.map(|d| d.format("%Y-%m-%d").to_string()),
+            end_date: e.end_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        })
+        .collect())
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -1180,6 +1285,8 @@ mod tests {
     use super::*;
     use passhound_core::repo::{accounts, passwords, sites};
     use tempfile::TempDir;
+    use passhound_core::repo::eras;
+    use chrono::NaiveDate;
 
     fn temp_vault() -> (TempDir, std::path::PathBuf) {
         let tmp = TempDir::new().unwrap();
@@ -1781,5 +1888,115 @@ mod tests {
         let detail = get_account_inner(&state, aid).unwrap();
         let promoted = detail.history.iter().find(|h| h.id == first_id).unwrap();
         assert!(promoted.is_current, "promoted row should be current (is_current=true)");
+    }
+
+    #[test]
+    fn recover_candidates_empty_vault_returns_error() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let result = recover_candidates_inner(&state, &RecoverFilters {
+            site: None, account: None, era: None, hint: None,
+            limit: 100, min_length: None,
+            require_symbol: false, require_digit: false,
+        });
+        assert!(matches!(result, Err(GuiError::EmptyVault)),
+                "expected EmptyVault, got {:?}", result.err());
+    }
+
+    #[test]
+    fn recover_candidates_with_seeded_history_returns_results() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "Reddit".into(),
+                url: Some("reddit.com".into()),
+                category: Some("Social".into()),
+                abbreviations: vec!["Rd".into()],
+                notes: None,
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id,
+                username: Some("chris".into()),
+                ..Default::default()
+            }).unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2019Rd", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2020Rd", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2021Rd", "manual").unwrap();
+        }
+
+        let result = recover_candidates_inner(&state, &RecoverFilters {
+            site: Some("Reddit".into()),
+            account: None, era: None,
+            hint: Some("moon".into()),
+            limit: 100, min_length: None,
+            require_symbol: false, require_digit: false,
+        }).unwrap();
+
+        assert!(!result.is_empty(), "recovery should produce candidates");
+        for (i, c) in result.iter().enumerate() {
+            assert_eq!(c.rank, i + 1, "rank should be 1-indexed and sequential");
+            assert!(c.score >= 0.0 && c.score <= 2.0, "score in expected range: {}", c.score);
+            assert!(!c.password.is_empty(), "password non-empty");
+            // Provenance may be empty for some candidates; just assert the shape is intact.
+        }
+    }
+
+    #[test]
+    fn recover_candidates_unknown_era_returns_era_not_found() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        // Seed minimal history so the EmptyVault error doesn't fire first.
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "X".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            passwords::set_current(v, a.id, "anything", "manual").unwrap();
+        }
+
+        let result = recover_candidates_inner(&state, &RecoverFilters {
+            site: None, account: None,
+            era: Some("nonexistent".into()),
+            hint: None,
+            limit: 100, min_length: None,
+            require_symbol: false, require_digit: false,
+        });
+        match result {
+            Err(GuiError::EraNotFound(name)) => assert_eq!(name, "nonexistent"),
+            other => panic!("expected EraNotFound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn list_eras_returns_inserted_eras() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            eras::add(
+                v,
+                "RuneScape years",
+                Some(NaiveDate::from_ymd_opt(2010, 1, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2015, 12, 31).unwrap()),
+                None,
+            ).unwrap();
+        }
+        let eras = list_eras_inner(&state).unwrap();
+        assert_eq!(eras.len(), 1);
+        assert_eq!(eras[0].name, "RuneScape years");
+        assert_eq!(eras[0].start_date.as_deref(), Some("2010-01-01"));
+        assert_eq!(eras[0].end_date.as_deref(), Some("2015-12-31"));
     }
 }

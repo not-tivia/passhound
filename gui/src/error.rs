@@ -15,6 +15,10 @@ pub enum GuiError {
     AlreadyExists,
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    #[error("vault has no password history to recover from")]
+    EmptyVault,
+    #[error("no era named '{0}'")]
+    EraNotFound(String),
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -43,11 +47,12 @@ impl From<passhound_core::error::Error> for GuiError {
             E::Aead => GuiError::WrongPassword,
             E::AlreadyExists => GuiError::AlreadyExists,
             E::InvalidInput(s) => GuiError::InvalidInput(s),
-            // Catch-all for: Io, Sqlite, Argon2, Import, NeedsColumnMapping,
-            // EmptyVault, EraNotFound. None of these are user-actionable in a
-            // distinct way at the GUI level — surface as a generic internal
-            // error. Add a specific arm here if a future variant needs its
-            // own UI treatment.
+            E::EmptyVault => GuiError::EmptyVault,
+            E::EraNotFound(name) => GuiError::EraNotFound(name),
+            // Catch-all for: Io, Sqlite, Argon2, Import, NeedsColumnMapping.
+            // None of these are user-actionable in a distinct way at the GUI
+            // level — surface as a generic internal error. Add a specific arm
+            // here if a future variant needs its own UI treatment.
             other => GuiError::Internal(other.to_string()),
         }
     }
