@@ -40,6 +40,8 @@ export type GuiErrorKind =
   | "WrongPassword"
   | "AlreadyExists"
   | "InvalidInput"
+  | "EmptyVault"
+  | "EraNotFound"
   | "Internal";
 
 export interface GuiError {
@@ -132,4 +134,36 @@ export interface AttachmentRead {
   mime_type: string;
   size_bytes: number;
   bytes_base64: string;
+}
+
+// Phase 4.8 — Recovery
+
+export interface RecoverFilters {
+  site: string | null;
+  account: string | null;
+  era: string | null;
+  hint: string | null;
+  limit: number;
+  minLength: number | null;
+  requireSymbol: boolean;
+  requireDigit: boolean;
+}
+
+export interface RuleTag {
+  tag: string;
+  name: string;
+}
+
+export interface CandidateView {
+  rank: number;
+  score: number;
+  password: string;
+  provenance: RuleTag[];
+}
+
+export interface EraSummary {
+  id: number;
+  name: string;
+  start_date: string | null;
+  end_date: string | null;
 }

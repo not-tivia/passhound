@@ -12,6 +12,9 @@ import type {
   SiteSummary,
   TagSummary,
   TagWithCount,
+  RecoverFilters,
+  CandidateView,
+  EraSummary,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -145,4 +148,9 @@ export const api = {
     if (typeof result === "string") return result;
     return null;
   },
+
+  // Phase 4.8 — Recovery
+  recoverCandidates: (filters: RecoverFilters) =>
+    call<CandidateView[]>("recover_candidates", { filters }),
+  listEras: () => call<EraSummary[]>("list_eras"),
 };
