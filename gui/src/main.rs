@@ -44,6 +44,10 @@ fn main() {
             promote_password,
             recover_candidates,
             list_eras,
+            list_base_words,
+            promote_base_word,
+            demote_base_word,
+            analyze_base_words,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

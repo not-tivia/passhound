@@ -1276,6 +1276,110 @@ pub fn list_eras_inner(state: &VaultState) -> Result<Vec<EraSummary>, GuiError> 
         .collect())
 }
 
+// =================================================================
+// Phase 4.9 — Base Words
+// =================================================================
+
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct BaseWordView {
+    pub id: i64,
+    pub word: String,
+    pub is_favorite: bool,
+    pub manual_override: bool,
+    pub usage_count: i64,
+    pub first_seen_at: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct AnalyzeReportView {
+    pub tokens_seen: usize,
+    pub base_words_written: usize,
+    pub favorites_set: usize,
+}
+
+#[tauri::command]
+pub fn list_base_words(
+    state: tauri::State<'_, VaultState>,
+) -> Result<Vec<BaseWordView>, GuiError> {
+    list_base_words_inner(&state)
+}
+
+pub fn list_base_words_inner(state: &VaultState) -> Result<Vec<BaseWordView>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let meta = passhound_core::repo::base_words::list(v)?;
+    let decrypted = passhound_core::repo::base_words::fetch_decrypted(v)?;
+    // Build id -> plaintext map. Plaintext crosses the IPC boundary as JSON,
+    // so the Zeroizing wrapper drops here. Same trade-off as reveal_password.
+    let mut by_id: std::collections::HashMap<i64, String> = std::collections::HashMap::with_capacity(decrypted.len());
+    for dw in decrypted {
+        by_id.insert(dw.id, dw.word.to_string());
+    }
+    let mut out = Vec::with_capacity(meta.len());
+    for m in meta {
+        let word = by_id.remove(&m.id).unwrap_or_default();
+        out.push(BaseWordView {
+            id: m.id,
+            word,
+            is_favorite: m.is_favorite,
+            manual_override: m.manual_override,
+            usage_count: m.usage_count,
+            first_seen_at: m.first_seen_at.map(|d| d.to_rfc3339()),
+            last_seen_at: m.last_seen_at.map(|d| d.to_rfc3339()),
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn promote_base_word(
+    state: tauri::State<'_, VaultState>,
+    id: i64,
+) -> Result<(), GuiError> {
+    promote_base_word_inner(&state, id)
+}
+
+pub fn promote_base_word_inner(state: &VaultState, id: i64) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::base_words::promote(v, id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn demote_base_word(
+    state: tauri::State<'_, VaultState>,
+    id: i64,
+) -> Result<(), GuiError> {
+    demote_base_word_inner(&state, id)
+}
+
+pub fn demote_base_word_inner(state: &VaultState, id: i64) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::base_words::demote(v, id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn analyze_base_words(
+    state: tauri::State<'_, VaultState>,
+) -> Result<AnalyzeReportView, GuiError> {
+    analyze_base_words_inner(&state)
+}
+
+pub fn analyze_base_words_inner(state: &VaultState) -> Result<AnalyzeReportView, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let report = passhound_core::recovery::analyze::extract_base_words_from_history(v, 10)?;
+    Ok(AnalyzeReportView {
+        tokens_seen: report.tokens_seen,
+        base_words_written: report.base_words_written,
+        favorites_set: report.favorites_set,
+    })
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -1284,6 +1388,7 @@ pub fn list_eras_inner(state: &VaultState) -> Result<Vec<EraSummary>, GuiError> 
 mod tests {
     use super::*;
     use passhound_core::repo::{accounts, passwords, sites};
+    use passhound_core::repo::base_words;
     use tempfile::TempDir;
     use passhound_core::repo::eras;
     use chrono::NaiveDate;
@@ -2006,5 +2111,122 @@ mod tests {
         assert_eq!(eras[0].name, "RuneScape years");
         assert_eq!(eras[0].start_date.as_deref(), Some("2010-01-01"));
         assert_eq!(eras[0].end_date.as_deref(), Some("2015-12-31"));
+    }
+
+    #[test]
+    fn list_base_words_returns_decrypted_pool() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "Reddit".into(),
+                ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id,
+                username: Some("chris".into()),
+                ..Default::default()
+            }).unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2019", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2020", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2021", "manual").unwrap();
+        }
+
+        // Analyze populates base_words. With three "MoonBeam$YYYY" passwords, at minimum
+        // "moonbeam" should be extracted multiple times -> usage_count >= 1.
+        analyze_base_words_inner(&state).unwrap();
+
+        let result = list_base_words_inner(&state).unwrap();
+        assert!(!result.is_empty(), "expected at least one base word");
+        for w in &result {
+            assert!(!w.word.is_empty(), "decrypted word should be non-empty");
+            assert!(w.usage_count >= 1, "usage_count should be at least 1");
+        }
+        // The tokenizer splits MoonBeam at the camelCase boundary, producing "moon" and "beam".
+        let has_moon = result.iter().any(|w| w.word.eq_ignore_ascii_case("moon"));
+        assert!(has_moon, "expected 'moon' in pool, got {:?}", result.iter().map(|w| &w.word).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn promote_then_list_reflects_favorite_flag() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "S".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            // Need enough tokens that NOT every word gets auto-favorited (default top-N = 10).
+            passwords::set_current(v, a.id, "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima", "manual").unwrap();
+        }
+        analyze_base_words_inner(&state).unwrap();
+        let words = list_base_words_inner(&state).unwrap();
+        // Pick a row that is NOT currently a favorite (one of the lower-ranked tokens).
+        let target = words.iter().find(|w| !w.is_favorite)
+            .expect("at least one non-favorite expected with 12 tokens and top-10 cutoff");
+        let target_id = target.id;
+
+        promote_base_word_inner(&state, target_id).unwrap();
+
+        let after = list_base_words_inner(&state).unwrap();
+        let row = after.iter().find(|w| w.id == target_id).unwrap();
+        assert!(row.is_favorite, "row should be favorite after promote");
+        assert!(row.manual_override, "row should have manual_override=true");
+    }
+
+    #[test]
+    fn demote_then_list_reflects_favorite_flag() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "S".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            // Three repetitions of the same word -> the canonical "moonbeam" will be
+            // a high-frequency token and (with default top-N = 10) likely a favorite.
+            passwords::set_current(v, a.id, "MoonBeam", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2019", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2020", "manual").unwrap();
+        }
+        analyze_base_words_inner(&state).unwrap();
+        let words = list_base_words_inner(&state).unwrap();
+        let target = words.iter().find(|w| w.is_favorite)
+            .expect("at least one favorite expected after analyze on 3 MoonBeam passwords");
+        let target_id = target.id;
+
+        demote_base_word_inner(&state, target_id).unwrap();
+
+        let after = list_base_words_inner(&state).unwrap();
+        let row = after.iter().find(|w| w.id == target_id).unwrap();
+        assert!(!row.is_favorite, "row should not be favorite after demote");
+        assert!(row.manual_override, "row should have manual_override=true");
+    }
+
+    #[test]
+    fn analyze_with_empty_history_returns_zero_report() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        // No accounts, no passwords. analyze should return a zero-value report,
+        // NOT an error. extract_base_words_from_history bails early with default()
+        // when password_history is empty.
+        let report = analyze_base_words_inner(&state).unwrap();
+        assert_eq!(report.tokens_seen, 0);
+        assert_eq!(report.base_words_written, 0);
+        assert_eq!(report.favorites_set, 0);
     }
 }
