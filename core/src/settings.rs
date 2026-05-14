@@ -74,11 +74,12 @@ fn read_bool(vault: &Vault, key: &str, default: bool) -> Result<bool> {
 }
 
 pub fn get(vault: &Vault) -> Result<SettingsView> {
+    let d = SettingsView::default();
     Ok(SettingsView {
-        idle_lock_seconds: read_u32(vault, KEY_IDLE_LOCK, 0)?,
-        clipboard_clear_seconds: read_u32(vault, KEY_CLIPBOARD_CLEAR, 0)?,
-        analyze_top_n: read_u32(vault, KEY_ANALYZE_TOP_N, 10)?,
-        default_reveal: read_bool(vault, KEY_DEFAULT_REVEAL, false)?,
+        idle_lock_seconds: read_u32(vault, KEY_IDLE_LOCK, d.idle_lock_seconds)?,
+        clipboard_clear_seconds: read_u32(vault, KEY_CLIPBOARD_CLEAR, d.clipboard_clear_seconds)?,
+        analyze_top_n: read_u32(vault, KEY_ANALYZE_TOP_N, d.analyze_top_n)?,
+        default_reveal: read_bool(vault, KEY_DEFAULT_REVEAL, d.default_reveal)?,
     })
 }
 
