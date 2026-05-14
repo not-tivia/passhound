@@ -1538,3 +1538,16 @@ select option {
 }
 .candidate-row__btn:hover:not(:disabled) { background: #2a2a32; color: var(--text-0); }
 .candidate-row__btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.recovery-filters-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.recovery-filters__era-error {
+  background: #2a1a1a;
+  border-top: 1px solid #5a2a2a;
+  color: var(--error, #d46a6a);
+  padding: 8px 14px;
+  font-size: 11px;
+}
