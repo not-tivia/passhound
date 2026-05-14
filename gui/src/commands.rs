@@ -1300,7 +1300,7 @@ pub struct AnalyzeReportView {
 
 #[tauri::command]
 pub fn list_base_words(
-    state: tauri::State<'_, VaultState>,
+    state: State<'_, VaultState>,
 ) -> Result<Vec<BaseWordView>, GuiError> {
     list_base_words_inner(&state)
 }
@@ -1312,7 +1312,7 @@ pub fn list_base_words_inner(state: &VaultState) -> Result<Vec<BaseWordView>, Gu
     let decrypted = passhound_core::repo::base_words::fetch_decrypted(v)?;
     // Build id -> plaintext map. Plaintext crosses the IPC boundary as JSON,
     // so the Zeroizing wrapper drops here. Same trade-off as reveal_password.
-    let mut by_id: std::collections::HashMap<i64, String> = std::collections::HashMap::with_capacity(decrypted.len());
+    let mut by_id: HashMap<i64, String> = HashMap::with_capacity(decrypted.len());
     for dw in decrypted {
         by_id.insert(dw.id, dw.word.to_string());
     }
@@ -1334,7 +1334,7 @@ pub fn list_base_words_inner(state: &VaultState) -> Result<Vec<BaseWordView>, Gu
 
 #[tauri::command]
 pub fn promote_base_word(
-    state: tauri::State<'_, VaultState>,
+    state: State<'_, VaultState>,
     id: i64,
 ) -> Result<(), GuiError> {
     promote_base_word_inner(&state, id)
@@ -1349,7 +1349,7 @@ pub fn promote_base_word_inner(state: &VaultState, id: i64) -> Result<(), GuiErr
 
 #[tauri::command]
 pub fn demote_base_word(
-    state: tauri::State<'_, VaultState>,
+    state: State<'_, VaultState>,
     id: i64,
 ) -> Result<(), GuiError> {
     demote_base_word_inner(&state, id)
@@ -1364,7 +1364,7 @@ pub fn demote_base_word_inner(state: &VaultState, id: i64) -> Result<(), GuiErro
 
 #[tauri::command]
 pub fn analyze_base_words(
-    state: tauri::State<'_, VaultState>,
+    state: State<'_, VaultState>,
 ) -> Result<AnalyzeReportView, GuiError> {
     analyze_base_words_inner(&state)
 }
