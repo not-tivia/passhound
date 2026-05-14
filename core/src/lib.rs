@@ -6,6 +6,7 @@ pub mod importer;
 pub mod recovery;
 pub mod repo;
 pub mod schema;
+pub mod settings;
 pub mod vault;
 
 pub use error::{Error, Result};
