@@ -1562,3 +1562,129 @@ select option {
   cursor: pointer;
 }
 .per-site__recover-account:hover { background: #2a2a32; color: var(--text-0); }
+
+/* ============================================================================
+   Phase 4.9 — Base Words view
+   ============================================================================ */
+
+.base-words {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  min-height: 0;
+}
+
+.base-words-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2a2a32;
+  background: #14141a;
+}
+.base-words-header__title {
+  font-size: 13px;
+  color: var(--text-0, #d0d0d8);
+}
+.base-words-header__reanalyze,
+.base-words-header__reveal {
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-0, #d0d0d8);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.base-words-header__reanalyze:hover:not(:disabled),
+.base-words-header__reveal:hover:not(:disabled) { background: #2a2a32; }
+.base-words-header__reanalyze:disabled,
+.base-words-header__reveal:disabled { opacity: 0.4; cursor: not-allowed; }
+.base-words-header__count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-1, #888);
+}
+
+.base-words-panes {
+  display: grid;
+  grid-template-columns: 42% 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.base-words-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.base-words-pane--favorites {
+  background: #181820;
+  border-right: 1px solid #2a2a32;
+}
+.base-words-pane__header {
+  padding: 8px 14px;
+  font-size: 10px;
+  color: var(--text-1, #888);
+  letter-spacing: 0.05em;
+}
+.base-words-pane__search {
+  margin: 0 14px 8px;
+  background: #14141a;
+  border: 1px solid #3a3a44;
+  padding: 5px 8px;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 12px;
+}
+.base-words-pane__list {
+  flex: 1;
+  overflow-y: auto;
+}
+.base-words-pane__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-1, #888);
+  font-size: 12px;
+}
+
+.base-word-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 60px 60px 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 14px;
+  font-family: Menlo, "Courier New", monospace;
+  font-size: 12px;
+  border-bottom: 1px solid #1a1a22;
+}
+.base-word-row:hover { background: #16161e; }
+.base-word-row__star { color: var(--text-1, #888); }
+.base-word-row__word { letter-spacing: 0.5px; }
+.base-word-row__count {
+  text-align: right;
+  color: var(--text-1, #888);
+}
+.base-word-row__badge {
+  font-size: 9px;
+  color: var(--text-1, #888);
+  text-transform: uppercase;
+}
+.base-word-row__action {
+  display: flex;
+  justify-content: flex-end;
+  visibility: hidden;
+}
+.base-word-row:hover .base-word-row__action { visibility: visible; }
+.base-word-row__btn {
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-1);
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  line-height: 1;
+}
+.base-word-row__btn:hover { background: #2a2a32; color: var(--text-0); }
