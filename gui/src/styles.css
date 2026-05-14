@@ -1506,6 +1506,7 @@ select option {
   color: var(--text-1, #888);
   border-bottom: 1px solid #2a2a32;
 }
+.candidate-row--header:hover { background: transparent; cursor: default; }
 .candidate-row--tried {
   opacity: 0.45;
   text-decoration: line-through;
