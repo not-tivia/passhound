@@ -8,6 +8,7 @@ import AccountFormModal from "../components/AccountFormModal";
 import PerSite from "./PerSite";
 import Import from "./Import";
 import Recovery from "./Recovery";
+import BaseWords from "./BaseWords";
 import { ToastProvider } from "../components/Toast";
 import { api } from "../api";
 import type { AccountSummary, GuiError } from "../types";
@@ -16,7 +17,7 @@ interface VaultProps {
   onLock: () => void;
 }
 
-type View = "list" | "import" | "recovery";
+type View = "list" | "import" | "recovery" | "base-words";
 
 export default function Vault({ onLock }: VaultProps) {
   const [view, setView] = useState<View>("list");
@@ -71,6 +72,7 @@ export default function Vault({ onLock }: VaultProps) {
             setRecoveryInitial(undefined);
             setView("recovery");
           }}
+          onBaseWordsClick={() => setView("base-words")}
         />
         {view === "list" && (
           <div className="vault-grid">
@@ -160,6 +162,9 @@ export default function Vault({ onLock }: VaultProps) {
             onLockedError={onLock}
             onNavigateToImport={() => setView("import")}
           />
+        )}
+        {view === "base-words" && (
+          <BaseWords onLockedError={onLock} />
         )}
       </div>
     </ToastProvider>
