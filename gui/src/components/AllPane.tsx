@@ -25,6 +25,7 @@ export default function AllPane({
         className="base-words-pane__search"
         type="text"
         placeholder="search words..."
+        aria-label="Search base words"
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
       />
