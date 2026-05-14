@@ -7,6 +7,7 @@ import ManageTagsOverlay from "../components/ManageTagsOverlay";
 import AccountFormModal from "../components/AccountFormModal";
 import PerSite from "./PerSite";
 import Import from "./Import";
+import Recovery from "./Recovery";
 import { ToastProvider } from "../components/Toast";
 import { api } from "../api";
 import type { AccountSummary, GuiError } from "../types";
@@ -15,13 +16,14 @@ interface VaultProps {
   onLock: () => void;
 }
 
-type View = "list" | "import";
+type View = "list" | "import" | "recovery";
 
 export default function Vault({ onLock }: VaultProps) {
   const [view, setView] = useState<View>("list");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   // Bump this to force a re-fetch after a successful import or mutation.
   const [refreshKey, setRefreshKey] = useState(0);
+  const [recoveryInitial, setRecoveryInitial] = useState<{ site?: string; account?: string } | undefined>(undefined);
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
@@ -65,6 +67,10 @@ export default function Vault({ onLock }: VaultProps) {
           onLock={onLock}
           onImportClick={() => setView("import")}
           onVaultClick={() => setView("list")}
+          onRecoveryClick={() => {
+            setRecoveryInitial(undefined);
+            setView("recovery");
+          }}
         />
         {view === "list" && (
           <div className="vault-grid">
@@ -108,6 +114,10 @@ export default function Vault({ onLock }: VaultProps) {
                     setSelectedId(null);
                     setRefreshKey((k) => k + 1);
                   }}
+                  onRecoverAccount={(siteName, accountLabel) => {
+                    setRecoveryInitial({ site: siteName, account: accountLabel ?? undefined });
+                    setView("recovery");
+                  }}
                 />
               )}
             </div>
@@ -142,6 +152,13 @@ export default function Vault({ onLock }: VaultProps) {
               setRefreshKey((k) => k + 1);
             }}
             onLockedError={onLock}
+          />
+        )}
+        {view === "recovery" && (
+          <Recovery
+            initial={recoveryInitial}
+            onLockedError={onLock}
+            onNavigateToImport={() => setView("import")}
           />
         )}
       </div>

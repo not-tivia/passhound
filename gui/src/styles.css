@@ -1551,3 +1551,14 @@ select option {
   padding: 8px 14px;
   font-size: 11px;
 }
+
+.per-site__recover-account {
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-1, #d0d0d8);
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.per-site__recover-account:hover { background: #2a2a32; color: var(--text-0); }

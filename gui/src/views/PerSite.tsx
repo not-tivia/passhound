@@ -12,9 +12,10 @@ interface PerSiteProps {
   accountId: number;
   onLockedError: () => void;
   onAccountDeleted: () => void;
+  onRecoverAccount: (siteName: string, accountLabel: string | null) => void;
 }
 
-export default function PerSite({ accountId, onLockedError, onAccountDeleted }: PerSiteProps) {
+export default function PerSite({ accountId, onLockedError, onAccountDeleted, onRecoverAccount }: PerSiteProps) {
   const [detail, setDetail] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -101,6 +102,18 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted }: 
       <div className="per-site__header">
         <div className="per-site__title-row">
           <div className="per-site__title">{detail.site_name}</div>
+          <button
+            className="per-site__recover-account"
+            onClick={() =>
+              onRecoverAccount(
+                detail.site_name,
+                detail.username ?? detail.display_name ?? null,
+              )
+            }
+            title="Open Recovery view pre-filled with this account"
+          >
+            Recover this password
+          </button>
           <button
             className="per-site__edit-account"
             onClick={() => setEditing(true)}
