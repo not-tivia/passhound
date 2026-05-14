@@ -15,6 +15,8 @@ import type {
   RecoverFilters,
   CandidateView,
   EraSummary,
+  BaseWordView,
+  AnalyzeReportView,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -153,4 +155,10 @@ export const api = {
   recoverCandidates: (filters: RecoverFilters) =>
     call<CandidateView[]>("recover_candidates", { filters }),
   listEras: () => call<EraSummary[]>("list_eras"),
+
+  // Phase 4.9 — Base Words
+  listBaseWords: () => call<BaseWordView[]>("list_base_words"),
+  promoteBaseWord: (id: number) => call<void>("promote_base_word", { id }),
+  demoteBaseWord: (id: number) => call<void>("demote_base_word", { id }),
+  analyzeBaseWords: () => call<AnalyzeReportView>("analyze_base_words"),
 };

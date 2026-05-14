@@ -167,3 +167,21 @@ export interface EraSummary {
   start_date: string | null;
   end_date: string | null;
 }
+
+// Phase 4.9 — Base Words
+
+export interface BaseWordView {
+  id: number;
+  word: string;
+  is_favorite: boolean;
+  manual_override: boolean;
+  usage_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+}
+
+export interface AnalyzeReportView {
+  tokens_seen: number;
+  base_words_written: number;
+  favorites_set: number;
+}
