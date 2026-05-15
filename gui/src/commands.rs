@@ -1440,6 +1440,30 @@ pub fn set_setting_inner(state: &VaultState, change: SettingChange) -> Result<()
     Ok(())
 }
 
+// =================================================================
+// Phase 4.11 — Master password change
+// =================================================================
+
+#[tauri::command]
+pub fn change_master_password(
+    state: State<'_, VaultState>,
+    current_pw: String,
+    new_pw: String,
+) -> Result<(), GuiError> {
+    change_master_password_inner(&state, current_pw.as_bytes(), new_pw.as_bytes())
+}
+
+pub fn change_master_password_inner(
+    state: &VaultState,
+    current_pw: &[u8],
+    new_pw: &[u8],
+) -> Result<(), GuiError> {
+    let mut guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_mut().ok_or(GuiError::Locked)?;
+    v.change_master_password(current_pw, new_pw)?;
+    Ok(())
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -2346,5 +2370,48 @@ mod tests {
         let favs = words.iter().filter(|w| w.is_favorite).count();
         assert_eq!(favs, 3, "expected exactly 3 favorites; got {}: {:?}",
             favs, words.iter().filter(|w| w.is_favorite).map(|w| &w.word).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn change_master_password_round_trip_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"old").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "Reddit".into(),
+                ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id,
+                username: Some("chris".into()),
+                ..Default::default()
+            }).unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2019", "manual").unwrap();
+        }
+
+        change_master_password_inner(&state, b"old", b"new").unwrap();
+        vault_lock_inner(&state).unwrap();
+        vault_unlock_inner(&state, &path, b"new").unwrap();
+
+        let list = list_accounts_inner(&state, None, None).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].site_name, "Reddit");
+        assert_eq!(list[0].username.as_deref(), Some("chris"));
+    }
+
+    #[test]
+    fn change_master_password_wrong_current_returns_error() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"actual").unwrap();
+        let result = change_master_password_inner(&state, b"wrong", b"new");
+        assert!(matches!(result, Err(GuiError::WrongPassword)),
+                "expected WrongPassword, got {:?}", result.err());
+        // Vault is still on the original password.
+        vault_lock_inner(&state).unwrap();
+        vault_unlock_inner(&state, &path, b"actual").unwrap();
     }
 }

@@ -50,6 +50,7 @@ fn main() {
             analyze_base_words,
             get_settings,
             set_setting,
+            change_master_password,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
