@@ -48,6 +48,8 @@ fn main() {
             promote_base_word,
             demote_base_word,
             analyze_base_words,
+            get_settings,
+            set_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

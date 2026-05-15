@@ -1372,12 +1372,72 @@ pub fn analyze_base_words(
 pub fn analyze_base_words_inner(state: &VaultState) -> Result<AnalyzeReportView, GuiError> {
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
-    let report = passhound_core::recovery::analyze::extract_base_words_from_history(v, 10)?;
+    let s = passhound_core::settings::get(v)?;
+    let report = passhound_core::recovery::analyze::extract_base_words_from_history(v, s.analyze_top_n as usize)?;
     Ok(AnalyzeReportView {
         tokens_seen: report.tokens_seen,
         base_words_written: report.base_words_written,
         favorites_set: report.favorites_set,
     })
+}
+
+// =================================================================
+// Phase 4.10 — Settings
+// =================================================================
+
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct SettingsView {
+    pub idle_lock_seconds: u32,
+    pub clipboard_clear_seconds: u32,
+    pub analyze_top_n: u32,
+    pub default_reveal: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(tag = "key", content = "value", rename_all = "snake_case")]
+pub enum SettingChange {
+    IdleLockSeconds(u32),
+    ClipboardClearSeconds(u32),
+    AnalyzeTopN(u32),
+    DefaultReveal(bool),
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, VaultState>) -> Result<SettingsView, GuiError> {
+    get_settings_inner(&state)
+}
+
+pub fn get_settings_inner(state: &VaultState) -> Result<SettingsView, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let s = passhound_core::settings::get(v)?;
+    Ok(SettingsView {
+        idle_lock_seconds: s.idle_lock_seconds,
+        clipboard_clear_seconds: s.clipboard_clear_seconds,
+        analyze_top_n: s.analyze_top_n,
+        default_reveal: s.default_reveal,
+    })
+}
+
+#[tauri::command]
+pub fn set_setting(
+    state: State<'_, VaultState>,
+    change: SettingChange,
+) -> Result<(), GuiError> {
+    set_setting_inner(&state, change)
+}
+
+pub fn set_setting_inner(state: &VaultState, change: SettingChange) -> Result<(), GuiError> {
+    use passhound_core::settings;
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    match change {
+        SettingChange::IdleLockSeconds(n) => settings::set_u32(v, settings::KEY_IDLE_LOCK, n)?,
+        SettingChange::ClipboardClearSeconds(n) => settings::set_u32(v, settings::KEY_CLIPBOARD_CLEAR, n)?,
+        SettingChange::AnalyzeTopN(n) => settings::set_u32(v, settings::KEY_ANALYZE_TOP_N, n)?,
+        SettingChange::DefaultReveal(b) => settings::set_bool(v, settings::KEY_DEFAULT_REVEAL, b)?,
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -2228,5 +2288,63 @@ mod tests {
         assert_eq!(report.tokens_seen, 0);
         assert_eq!(report.base_words_written, 0);
         assert_eq!(report.favorites_set, 0);
+    }
+
+    #[test]
+    fn get_settings_returns_defaults_on_fresh_vault() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let s = get_settings_inner(&state).unwrap();
+        assert_eq!(s.idle_lock_seconds, 0);
+        assert_eq!(s.clipboard_clear_seconds, 0);
+        assert_eq!(s.analyze_top_n, 10);
+        assert!(!s.default_reveal);
+    }
+
+    #[test]
+    fn set_then_get_round_trip() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        set_setting_inner(&state, SettingChange::IdleLockSeconds(900)).unwrap();
+        set_setting_inner(&state, SettingChange::DefaultReveal(true)).unwrap();
+        let s = get_settings_inner(&state).unwrap();
+        assert_eq!(s.idle_lock_seconds, 900);
+        assert!(s.default_reveal);
+        // Untouched keys retain defaults.
+        assert_eq!(s.clipboard_clear_seconds, 0);
+        assert_eq!(s.analyze_top_n, 10);
+    }
+
+    #[test]
+    fn analyze_base_words_honors_top_n_from_settings() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "S".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            // 5 distinct frequent tokens: alpha bravo charlie delta echo, each
+            // appearing in multiple passwords so all rank above the cutoff.
+            passwords::set_current(v, a.id, "alpha bravo charlie delta echo", "manual").unwrap();
+            passwords::set_current(v, a.id, "alpha bravo charlie delta echo", "manual").unwrap();
+            passwords::set_current(v, a.id, "alpha bravo charlie delta echo", "manual").unwrap();
+        }
+        // Set top-N to 3 BEFORE analyze.
+        set_setting_inner(&state, SettingChange::AnalyzeTopN(3)).unwrap();
+
+        analyze_base_words_inner(&state).unwrap();
+
+        let words = list_base_words_inner(&state).unwrap();
+        let favs = words.iter().filter(|w| w.is_favorite).count();
+        assert_eq!(favs, 3, "expected exactly 3 favorites; got {}: {:?}",
+            favs, words.iter().filter(|w| w.is_favorite).map(|w| &w.word).collect::<Vec<_>>());
     }
 }
