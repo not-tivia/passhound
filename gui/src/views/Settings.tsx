@@ -1,18 +1,24 @@
+import { useState } from "react";
 import { useSettings } from "../context/SettingsContext";
 import { useToast } from "../components/Toast";
 import SettingsSection from "../components/SettingsSection";
 import SettingNumberInput from "../components/SettingNumberInput";
 import SettingCheckbox from "../components/SettingCheckbox";
+import ChangeMasterPasswordModal from "../components/ChangeMasterPasswordModal";
+import ConfirmReunlockModal from "../components/ConfirmReunlockModal";
 import { api } from "../api";
 import type { GuiError, SettingChange } from "../types";
 
 interface SettingsProps {
   onLockedError: () => void;
+  onLock: () => void;
 }
 
-export default function Settings({ onLockedError }: SettingsProps) {
+export default function Settings({ onLockedError, onLock }: SettingsProps) {
   const { settings, refresh } = useSettings();
   const toast = useToast();
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [confirmReunlockOpen, setConfirmReunlockOpen] = useState(false);
 
   const save = async (change: SettingChange) => {
     try {
@@ -28,6 +34,18 @@ export default function Settings({ onLockedError }: SettingsProps) {
   return (
     <div className="settings">
       <div className="settings__title">Settings</div>
+
+      <SettingsSection title="MASTER PASSWORD">
+        <div className="settings-row">
+          <label className="settings-row__label">Master password</label>
+          <button
+            className="settings-row__change-pw-btn"
+            onClick={() => setChangeOpen(true)}
+          >
+            Change…
+          </button>
+        </div>
+      </SettingsSection>
 
       <SettingsSection title="SECURITY">
         <SettingNumberInput
@@ -70,6 +88,24 @@ export default function Settings({ onLockedError }: SettingsProps) {
       </SettingsSection>
 
       <div className="settings__footnote">All settings save automatically as you type.</div>
+      {changeOpen && (
+        <ChangeMasterPasswordModal
+          onClose={() => setChangeOpen(false)}
+          onChanged={() => {
+            setChangeOpen(false);
+            setConfirmReunlockOpen(true);
+          }}
+          onLockedError={onLockedError}
+        />
+      )}
+      {confirmReunlockOpen && (
+        <ConfirmReunlockModal
+          onReunlock={() => {
+            setConfirmReunlockOpen(false);
+            onLock();
+          }}
+        />
+      )}
     </div>
   );
 }

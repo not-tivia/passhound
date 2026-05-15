@@ -1761,3 +1761,32 @@ select option {
   color: var(--text-1, #888);
   font-style: italic;
 }
+
+/* ============================================================================
+   Phase 4.11 — Master password change
+   ============================================================================ */
+
+.settings-row__change-pw-btn {
+  background: transparent;
+  border: 1px solid #3a3a44;
+  color: var(--text-0, #d0d0d8);
+  padding: 4px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.settings-row__change-pw-btn:hover { background: #2a2a32; }
+
+.modal--change-master-pw { min-width: 420px; }
+
+.modal--confirm-reunlock { min-width: 360px; }
+.modal--confirm-reunlock .modal__body-text {
+  margin: 14px 0 0;
+  color: var(--text-0, #d0d0d8);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.account-form__error--general {
+  margin-top: 10px;
+}

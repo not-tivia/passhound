@@ -169,7 +169,7 @@ export default function Vault({ onLock }: VaultProps) {
           <BaseWords onLockedError={onLock} />
         )}
         {view === "settings" && (
-          <Settings onLockedError={onLock} />
+          <Settings onLockedError={onLock} onLock={onLock} />
         )}
       </div>
     </ToastProvider>
