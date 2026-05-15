@@ -175,4 +175,8 @@ export const api = {
       }, clipboardClearSeconds * 1000);
     }
   },
+
+  // Phase 4.11 — Master password change
+  changeMasterPassword: (currentPw: string, newPw: string) =>
+    call<void>("change_master_password", { currentPw, newPw }),
 };
