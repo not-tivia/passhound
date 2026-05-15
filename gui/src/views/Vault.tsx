@@ -9,6 +9,7 @@ import PerSite from "./PerSite";
 import Import from "./Import";
 import Recovery from "./Recovery";
 import BaseWords from "./BaseWords";
+import Settings from "./Settings";
 import { ToastProvider } from "../components/Toast";
 import { api } from "../api";
 import type { AccountSummary, GuiError } from "../types";
@@ -17,7 +18,7 @@ interface VaultProps {
   onLock: () => void;
 }
 
-type View = "list" | "import" | "recovery" | "base-words";
+type View = "list" | "import" | "recovery" | "base-words" | "settings";
 
 export default function Vault({ onLock }: VaultProps) {
   const [view, setView] = useState<View>("list");
@@ -73,6 +74,7 @@ export default function Vault({ onLock }: VaultProps) {
             setView("recovery");
           }}
           onBaseWordsClick={() => setView("base-words")}
+          onSettingsClick={() => setView("settings")}
         />
         {view === "list" && (
           <div className="vault-grid">
@@ -165,6 +167,9 @@ export default function Vault({ onLock }: VaultProps) {
         )}
         {view === "base-words" && (
           <BaseWords onLockedError={onLock} />
+        )}
+        {view === "settings" && (
+          <Settings onLockedError={onLock} />
         )}
       </div>
     </ToastProvider>

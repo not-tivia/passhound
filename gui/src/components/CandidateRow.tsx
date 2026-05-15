@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useToast } from "./Toast";
+import { useSettings } from "../context/SettingsContext";
 import type { CandidateView, GuiError } from "../types";
 
 const MASK = "•".repeat(12);
@@ -21,13 +22,14 @@ export default function CandidateRow({
   onLockedError,
 }: CandidateRowProps) {
   const toast = useToast();
+  const { settings } = useSettings();
   const [busy, setBusy] = useState(false);
 
   const handleCopy = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      await api.copyToClipboard(candidate.password);
+      await api.copyToClipboardWithAutoClear(candidate.password, settings.clipboard_clear_seconds);
       toast.show("Copied");
     } catch (e) {
       const err = e as GuiError;

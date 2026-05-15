@@ -3,6 +3,7 @@ import BaseWordsHeader from "../components/BaseWordsHeader";
 import FavoritesPane from "../components/FavoritesPane";
 import AllPane from "../components/AllPane";
 import { useToast } from "../components/Toast";
+import { useSettings } from "../context/SettingsContext";
 import { api } from "../api";
 import type { BaseWordView, GuiError } from "../types";
 
@@ -12,9 +13,12 @@ interface BaseWordsProps {
 
 export default function BaseWords({ onLockedError }: BaseWordsProps) {
   const toast = useToast();
+  const { settings } = useSettings();
   const [words, setWords] = useState<BaseWordView[]>([]);
   const [search, setSearch] = useState("");
-  const [revealAll, setRevealAll] = useState(false);
+  // useState(initial) only uses initial on first render — subsequent changes to
+  // settings.default_reveal do not override the user's in-view toggle.
+  const [revealAll, setRevealAll] = useState(settings.default_reveal);
   const [analyzing, setAnalyzing] = useState(false);
 
   const fetchWords = async () => {

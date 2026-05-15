@@ -1,10 +1,11 @@
 interface IconRailProps {
-  currentView: "list" | "import" | "recovery" | "base-words";
+  currentView: "list" | "import" | "recovery" | "base-words" | "settings";
   onLock: () => void;
   onImportClick: () => void;
   onVaultClick: () => void;
   onRecoveryClick: () => void;
   onBaseWordsClick: () => void;
+  onSettingsClick: () => void;
 }
 
 export default function IconRail({
@@ -14,6 +15,7 @@ export default function IconRail({
   onVaultClick,
   onRecoveryClick,
   onBaseWordsClick,
+  onSettingsClick,
 }: IconRailProps) {
   return (
     <div className="icon-rail">
@@ -49,9 +51,9 @@ export default function IconRail({
         {"\u{2605}"}
       </button>
       <button
-        className="icon-rail__item icon-rail__item--disabled"
-        title="Settings (Phase 4.10)"
-        disabled
+        className={`icon-rail__item ${currentView === "settings" ? "icon-rail__item--active" : ""}`}
+        title="Settings"
+        onClick={onSettingsClick}
       >
         {"\u{2699}"}
       </button>

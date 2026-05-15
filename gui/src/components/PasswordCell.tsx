@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useToast } from "./Toast";
+import { useSettings } from "../context/SettingsContext";
 import type { GuiError } from "../types";
 
 interface PasswordCellProps {
@@ -14,6 +15,7 @@ export default function PasswordCell({ historyId, onLockedError, onDelete, onPro
   const [revealed, setRevealed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const { settings } = useSettings();
 
   const fetchPlaintext = async (): Promise<string | null> => {
     setBusy(true);
@@ -43,7 +45,7 @@ export default function PasswordCell({ historyId, onLockedError, onDelete, onPro
     if (pt === null) pt = await fetchPlaintext();
     if (pt === null) return;
     try {
-      await api.copyToClipboard(pt);
+      await api.copyToClipboardWithAutoClear(pt, settings.clipboard_clear_seconds);
       toast.show("Copied");
     } catch (e) {
       const err = e as GuiError;

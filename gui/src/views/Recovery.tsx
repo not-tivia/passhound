@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import RecoveryFilters from "../components/RecoveryFilters";
 import RecoveryResults from "../components/RecoveryResults";
+import { useSettings } from "../context/SettingsContext";
 import { api } from "../api";
 import type { CandidateView, GuiError, RecoverFilters } from "../types";
 
@@ -41,10 +42,13 @@ export default function Recovery({
     site: initial?.site ?? null,
     account: initial?.account ?? null,
   });
+  const { settings } = useSettings();
   const [candidates, setCandidates] = useState<CandidateView[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ResultsError | null>(null);
-  const [revealAll, setRevealAll] = useState(false);
+  // useState(initial) only uses initial on first render — subsequent changes to
+  // settings.default_reveal do not override the user's in-view toggle.
+  const [revealAll, setRevealAll] = useState(settings.default_reveal);
   const [triedIds, setTriedIds] = useState<Set<number>>(new Set());
 
   const hasRunOnce = useRef<boolean>(false);
