@@ -17,6 +17,8 @@ import type {
   EraSummary,
   BaseWordView,
   AnalyzeReportView,
+  SettingsView,
+  SettingChange,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -161,4 +163,16 @@ export const api = {
   promoteBaseWord: (id: number) => call<void>("promote_base_word", { id }),
   demoteBaseWord: (id: number) => call<void>("demote_base_word", { id }),
   analyzeBaseWords: () => call<AnalyzeReportView>("analyze_base_words"),
+
+  // Phase 4.10 — Settings
+  getSettings: () => call<SettingsView>("get_settings"),
+  setSetting: (change: SettingChange) => call<void>("set_setting", { change }),
+  copyToClipboardWithAutoClear: async (text: string, clipboardClearSeconds: number) => {
+    await call<void>("copy_to_clipboard", { text });
+    if (clipboardClearSeconds > 0) {
+      window.setTimeout(() => {
+        call<void>("copy_to_clipboard", { text: "" }).catch(() => {});
+      }, clipboardClearSeconds * 1000);
+    }
+  },
 };

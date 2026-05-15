@@ -185,3 +185,18 @@ export interface AnalyzeReportView {
   base_words_written: number;
   favorites_set: number;
 }
+
+// Phase 4.10 — Settings
+
+export interface SettingsView {
+  idle_lock_seconds: number;
+  clipboard_clear_seconds: number;
+  analyze_top_n: number;
+  default_reveal: boolean;
+}
+
+export type SettingChange =
+  | { key: "idle_lock_seconds"; value: number }
+  | { key: "clipboard_clear_seconds"; value: number }
+  | { key: "analyze_top_n"; value: number }
+  | { key: "default_reveal"; value: boolean };
