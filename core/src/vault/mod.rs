@@ -131,6 +131,141 @@ impl Vault {
     }
 
     pub fn conn(&self) -> &Connection { &self.conn }
+
+    /// Re-derive the vault key under `new_pw` and re-encrypt every encrypted
+    /// blob in the vault, atomically. On success, the in-memory MasterKey is
+    /// swapped to the new key and vault_meta is updated with a fresh salt +
+    /// verifier_ct + verifier_nonce.
+    ///
+    /// `current_pw` is verified against the existing verifier BEFORE any
+    /// writes; mismatch returns `Error::Aead` (which `From<core::Error> for
+    /// GuiError` maps to `WrongPassword`).
+    ///
+    /// Any failure during re-encryption rolls back the transaction; the vault
+    /// stays on `current_pw` and the in-memory key is unchanged.
+    pub fn change_master_password(
+        &mut self,
+        current_pw: &[u8],
+        new_pw: &[u8],
+    ) -> Result<()> {
+        // Step 1: Verify the current password.
+        let old_salt: Vec<u8> = self.conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![META_SALT],
+            |r| r.get(0),
+        )?;
+        let verifier_ct: Vec<u8> = self.conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![META_VERIFIER_CT],
+            |r| r.get(0),
+        )?;
+        let verifier_nonce_vec: Vec<u8> = self.conn.query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![META_VERIFIER_NONCE],
+            |r| r.get(0),
+        )?;
+        let mut verifier_nonce = [0u8; crate::crypto::aead::NONCE_LEN];
+        if verifier_nonce_vec.len() != verifier_nonce.len() {
+            return Err(Error::InvalidInput("malformed verifier nonce".into()));
+        }
+        verifier_nonce.copy_from_slice(&verifier_nonce_vec);
+
+        let old_key_bytes = kdf::derive_key(current_pw, &old_salt)?;
+        let old_key = MasterKey::new(old_key_bytes);
+        let pt = crate::crypto::aead::decrypt(old_key.as_bytes(), &verifier_ct, &verifier_nonce)?;
+        if pt != KDF_VERIFIER_PLAINTEXT {
+            return Err(Error::Aead);
+        }
+
+        // Step 2: Derive the new key under a fresh salt.
+        let new_salt = kdf::generate_salt();
+        let new_key_bytes = kdf::derive_key(new_pw, &new_salt)?;
+        let new_key = MasterKey::new(new_key_bytes);
+
+        // Step 3-7: Re-encrypt every blob in a single transaction.
+        let tx = self.conn.unchecked_transaction()?;
+
+        // Step 4: password_history
+        let rows: Vec<(i64, Vec<u8>, Vec<u8>)> = tx
+            .prepare("SELECT id, password_encrypted, password_nonce FROM password_history")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (id, ct, nonce_vec) in rows {
+            if nonce_vec.len() != crate::crypto::aead::NONCE_LEN {
+                return Err(Error::InvalidInput("malformed password nonce".into()));
+            }
+            let mut nonce = [0u8; crate::crypto::aead::NONCE_LEN];
+            nonce.copy_from_slice(&nonce_vec);
+            let plaintext = crate::crypto::aead::decrypt(old_key.as_bytes(), &ct, &nonce)?;
+            let (new_ct, new_nonce) = crate::crypto::aead::encrypt(new_key.as_bytes(), &plaintext)?;
+            tx.execute(
+                "UPDATE password_history SET password_encrypted = ?1, password_nonce = ?2 WHERE id = ?3",
+                params![new_ct, new_nonce.as_slice(), id],
+            )?;
+        }
+
+        // Step 5: base_words
+        let rows: Vec<(i64, Vec<u8>, Vec<u8>)> = tx
+            .prepare("SELECT id, word_encrypted, word_nonce FROM base_words")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (id, ct, nonce_vec) in rows {
+            if nonce_vec.len() != crate::crypto::aead::NONCE_LEN {
+                return Err(Error::InvalidInput("malformed base_word nonce".into()));
+            }
+            let mut nonce = [0u8; crate::crypto::aead::NONCE_LEN];
+            nonce.copy_from_slice(&nonce_vec);
+            let plaintext = crate::crypto::aead::decrypt(old_key.as_bytes(), &ct, &nonce)?;
+            let (new_ct, new_nonce) = crate::crypto::aead::encrypt(new_key.as_bytes(), &plaintext)?;
+            tx.execute(
+                "UPDATE base_words SET word_encrypted = ?1, word_nonce = ?2 WHERE id = ?3",
+                params![new_ct, new_nonce.as_slice(), id],
+            )?;
+        }
+
+        // Step 6: attachments
+        let rows: Vec<(i64, Vec<u8>, Vec<u8>)> = tx
+            .prepare("SELECT id, blob_encrypted, blob_nonce FROM attachments")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (id, ct, nonce_vec) in rows {
+            if nonce_vec.len() != crate::crypto::aead::NONCE_LEN {
+                return Err(Error::InvalidInput("malformed attachment nonce".into()));
+            }
+            let mut nonce = [0u8; crate::crypto::aead::NONCE_LEN];
+            nonce.copy_from_slice(&nonce_vec);
+            let plaintext = crate::crypto::aead::decrypt(old_key.as_bytes(), &ct, &nonce)?;
+            let (new_ct, new_nonce) = crate::crypto::aead::encrypt(new_key.as_bytes(), &plaintext)?;
+            tx.execute(
+                "UPDATE attachments SET blob_encrypted = ?1, blob_nonce = ?2 WHERE id = ?3",
+                params![new_ct, new_nonce.as_slice(), id],
+            )?;
+        }
+
+        // Step 7: re-encrypt verifier + rewrite meta.
+        let (new_verifier_ct, new_verifier_nonce) =
+            crate::crypto::aead::encrypt(new_key.as_bytes(), KDF_VERIFIER_PLAINTEXT)?;
+        tx.execute(
+            "UPDATE vault_meta SET value = ?1 WHERE key = ?2",
+            params![new_salt.as_slice(), META_SALT],
+        )?;
+        tx.execute(
+            "UPDATE vault_meta SET value = ?1 WHERE key = ?2",
+            params![new_verifier_ct, META_VERIFIER_CT],
+        )?;
+        tx.execute(
+            "UPDATE vault_meta SET value = ?1 WHERE key = ?2",
+            params![new_verifier_nonce.as_slice(), META_VERIFIER_NONCE],
+        )?;
+
+        // Step 8: commit.
+        tx.commit()?;
+
+        // Step 9: swap in-memory key. (The old MasterKey drops here.)
+        self.key = Some(new_key);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -210,5 +345,139 @@ mod tests {
         assert!(v.is_unlocked());
         v.lock();
         assert!(!v.is_unlocked());
+    }
+
+    #[test]
+    fn change_master_password_round_trip() {
+        use crate::repo::{accounts, base_words, passwords, sites};
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("vault.db");
+
+        // Seed a vault with content: a site, an account with one password,
+        // and a base_word.
+        {
+            let v = Vault::create(&path, b"old").unwrap();
+            let s = sites::create(&v, sites::NewSite {
+                name: "Reddit".into(),
+                ..Default::default()
+            }).unwrap();
+            let a = accounts::create(&v, accounts::NewAccount {
+                site_id: s.id,
+                ..Default::default()
+            }).unwrap();
+            passwords::set_current(&v, a.id, "MoonBeam$2019", "manual").unwrap();
+            base_words::upsert_aggregated(&v, base_words::AggregatedToken {
+                word: "moonbeam",
+                usage_count: 1,
+                first_seen_at: chrono::Utc::now(),
+                last_seen_at: chrono::Utc::now(),
+                casing_mask: 0,
+            }).unwrap();
+        }
+
+        // Change the password.
+        {
+            let mut v = Vault::open(&path).unwrap();
+            v.unlock(b"old").unwrap();
+            v.change_master_password(b"old", b"new").unwrap();
+        }
+
+        // Reopen with the NEW password; assert content intact.
+        let mut v = Vault::open(&path).unwrap();
+        assert!(v.unlock(b"old").is_err(), "old password must no longer unlock");
+        let mut v = Vault::open(&path).unwrap();
+        v.unlock(b"new").unwrap();
+
+        let sites_list = sites::list(&v).unwrap();
+        assert_eq!(sites_list.len(), 1);
+        assert_eq!(sites_list[0].name, "Reddit");
+
+        // Verify password decrypts. Use the existing repo helper.
+        let acct = accounts::list_all(&v, &[]).unwrap()[0].clone();
+        let current = passwords::current_plaintext(&v, acct.id).unwrap().unwrap();
+        assert_eq!(current.as_str(), "MoonBeam$2019");
+
+        // Verify base_word decrypts.
+        let words = base_words::fetch_decrypted(&v).unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].word.as_str(), "moonbeam");
+    }
+
+    #[test]
+    fn change_master_password_rejects_wrong_current() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("vault.db");
+        {
+            let _ = Vault::create(&path, b"actual").unwrap();
+        }
+
+        let mut v = Vault::open(&path).unwrap();
+        v.unlock(b"actual").unwrap();
+        let err = v.change_master_password(b"wrong", b"new").unwrap_err();
+        assert!(matches!(err, Error::Aead), "expected Error::Aead, got {:?}", err);
+
+        // Vault is still on the original password.
+        let mut v = Vault::open(&path).unwrap();
+        v.unlock(b"actual").unwrap();
+        assert!(v.is_unlocked());
+        assert!(Vault::open(&path).unwrap().unlock(b"new").is_err());
+    }
+
+    #[test]
+    fn change_master_password_atomic_under_failure() {
+        use crate::repo::{accounts, passwords, sites};
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("vault.db");
+
+        // Seed a vault with one valid password row.
+        {
+            let v = Vault::create(&path, b"old").unwrap();
+            let s = sites::create(&v, sites::NewSite {
+                name: "Site".into(),
+                ..Default::default()
+            }).unwrap();
+            let a = accounts::create(&v, accounts::NewAccount {
+                site_id: s.id,
+                ..Default::default()
+            }).unwrap();
+            passwords::set_current(&v, a.id, "valid_password", "manual").unwrap();
+        }
+
+        // Inject a CORRUPT password_history row directly via SQL. It has valid
+        // schema-shape bytes but the ciphertext will not decrypt under the
+        // current key. This forces the re-encryption loop to fail at step 4.
+        {
+            let conn = Connection::open(&path).unwrap();
+            // Insert a second password_history row with garbage ciphertext but
+            // a correctly-sized nonce. account_id reuses the row above.
+            let aid: i64 = conn.query_row("SELECT id FROM accounts LIMIT 1", [], |r| r.get(0)).unwrap();
+            conn.execute(
+                "INSERT INTO password_history
+                   (account_id, password_encrypted, password_nonce, source, confidence, created_at, retired_at, notes)
+                 VALUES (?1, ?2, ?3, 'manual', 'certain', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)",
+                params![aid, vec![0u8; 32], vec![0u8; crate::crypto::aead::NONCE_LEN]],
+            ).unwrap();
+        }
+
+        // Try to change. The corrupt row should cause decrypt to fail; the
+        // transaction must roll back leaving the vault on the OLD password.
+        let mut v = Vault::open(&path).unwrap();
+        v.unlock(b"old").unwrap();
+        let err = v.change_master_password(b"old", b"new").unwrap_err();
+        assert!(matches!(err, Error::Aead), "expected Error::Aead, got {:?}", err);
+
+        // Reopen with the OLD password -- should still work.
+        let mut v = Vault::open(&path).unwrap();
+        v.unlock(b"old").unwrap();
+
+        // The valid row's plaintext is still decryptable.
+        let acct = accounts::list_all(&v, &[]).unwrap()[0].clone();
+        let current = passwords::current_plaintext(&v, acct.id).unwrap().unwrap();
+        assert_eq!(current.as_str(), "valid_password");
+
+        // The NEW password does NOT unlock.
+        assert!(Vault::open(&path).unwrap().unlock(b"new").is_err());
     }
 }
