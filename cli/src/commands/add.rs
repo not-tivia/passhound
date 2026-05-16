@@ -30,11 +30,15 @@ pub fn run(path: &Path, args: AddArgs) -> Result<()> {
     if !path.exists() {
         anyhow::bail!("vault not found at {}; run `init` first", path.display());
     }
-    let pw = rpassword::prompt_password("Master password: ")?;
+    let pw = zeroize::Zeroizing::new(
+        rpassword::prompt_password("Master password: ")?
+    );
     let mut vault = Vault::open(path)?;
     vault.unlock(pw.as_bytes()).context("unlock failed (wrong master password?)")?;
 
-    let secret = rpassword::prompt_password(format!("Password for {}: ", args.site))?;
+    let secret = zeroize::Zeroizing::new(
+        rpassword::prompt_password(format!("Password for {}: ", args.site))?
+    );
     if secret.is_empty() {
         anyhow::bail!("password must not be empty");
     }
@@ -64,7 +68,7 @@ pub fn run(path: &Path, args: AddArgs) -> Result<()> {
     })?;
     passwords::insert(&vault, NewPassword {
         account_id: account.id,
-        plaintext: &secret,
+        plaintext: secret.as_str(),
         source: "manual".into(),
         confidence: Confidence::Certain,
         notes: None,

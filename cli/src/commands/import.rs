@@ -85,7 +85,9 @@ fn run_csv(vault_path: &Path, args: CsvArgs) -> Result<()> {
         anyhow::bail!("csv not found at {}", args.path.display());
     }
 
-    let pw = rpassword::prompt_password("Master password: ")?;
+    let pw = zeroize::Zeroizing::new(
+        rpassword::prompt_password("Master password: ")?
+    );
     let mut vault = Vault::open(vault_path)?;
     vault.unlock(pw.as_bytes()).context("unlock failed")?;
 
@@ -132,7 +134,9 @@ fn run_paste(vault_path: &Path, args: PasteArgs) -> Result<()> {
         anyhow::bail!("vault not found at {}", vault_path.display());
     }
 
-    let pw = rpassword::prompt_password("Master password: ")?;
+    let pw = zeroize::Zeroizing::new(
+        rpassword::prompt_password("Master password: ")?
+    );
     let mut vault = Vault::open(vault_path)?;
     vault.unlock(pw.as_bytes()).context("unlock failed")?;
 
@@ -359,7 +363,9 @@ fn run_undo(vault_path: &Path, args: UndoArgs) -> Result<()> {
     if !vault_path.exists() {
         anyhow::bail!("vault not found at {}", vault_path.display());
     }
-    let pw = rpassword::prompt_password("Master password: ")?;
+    let pw = zeroize::Zeroizing::new(
+        rpassword::prompt_password("Master password: ")?
+    );
     let mut vault = Vault::open(vault_path)?;
     vault.unlock(pw.as_bytes()).context("unlock failed")?;
 

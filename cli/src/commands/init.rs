@@ -9,9 +9,13 @@ pub fn run(path: &Path) -> Result<()> {
     if path.exists() {
         anyhow::bail!("vault already exists at {}", path.display());
     }
-    let pw = rpassword::prompt_password("New master password: ")?;
-    let pw2 = rpassword::prompt_password("Confirm master password: ")?;
-    if pw != pw2 {
+    let pw = zeroize::Zeroizing::new(
+        rpassword::prompt_password("New master password: ")?
+    );
+    let pw2 = zeroize::Zeroizing::new(
+        rpassword::prompt_password("Confirm master password: ")?
+    );
+    if *pw != *pw2 {
         anyhow::bail!("passwords do not match");
     }
     if pw.len() < 8 {

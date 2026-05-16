@@ -15,6 +15,7 @@ path = "src/main.rs"
 passhound-core = { path = "../core" }
 clap = { version = "4", features = ["derive"] }
 rpassword = "7"
+zeroize = "1"
 anyhow = "1"
 directories = "5"
 csv = "1"
