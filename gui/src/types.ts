@@ -215,3 +215,28 @@ export interface RecordFeedbackPayload {
   hasUpper: boolean;
   hasLower: boolean;
 }
+
+// Phase 4.14 — Small items bundle
+
+export interface AddPasswordPayload {
+  accountId: number;
+  plaintext: string;
+  source?: string;
+}
+
+export interface UpdateSitePayload {
+  name: string;
+  url: string | null;
+  category: string | null;
+  abbreviations: string[];
+  notes: string | null;
+}
+
+export interface GeneratorOptionsPayload {
+  length: number;
+  lowercase: boolean;
+  uppercase: boolean;
+  digits: boolean;
+  symbols: boolean;
+  avoidAmbiguous: boolean;
+}

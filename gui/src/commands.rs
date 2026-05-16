@@ -939,23 +939,31 @@ pub fn update_account_inner(
     Ok(())
 }
 
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AddPasswordPayload {
+    pub account_id: i64,
+    pub plaintext: String,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
 #[tauri::command]
 pub fn add_password(
     state: State<'_, VaultState>,
-    account_id: i64,
-    plaintext: String,
+    payload: AddPasswordPayload,
 ) -> Result<i64, GuiError> {
-    add_password_inner(&state, account_id, &plaintext)
+    add_password_inner(&state, payload)
 }
 
 pub fn add_password_inner(
     state: &VaultState,
-    account_id: i64,
-    plaintext: &str,
+    payload: AddPasswordPayload,
 ) -> Result<i64, GuiError> {
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
-    let record = passhound_core::repo::passwords::set_current(v, account_id, plaintext, "manual")?;
+    let source = payload.source.as_deref().unwrap_or("manual");
+    let record = passhound_core::repo::passwords::set_current(v, payload.account_id, &payload.plaintext, source)?;
     Ok(record.id)
 }
 
@@ -1533,6 +1541,109 @@ pub fn clear_recovery_feedback_inner(
     Ok(n)
 }
 
+// =================================================================
+// Phase 4.14 — Small items bundle
+// =================================================================
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSitePayload {
+    pub name: String,
+    pub url: Option<String>,
+    pub category: Option<String>,
+    pub abbreviations: Vec<String>,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub fn update_site(
+    state: State<'_, VaultState>,
+    site_id: i64,
+    payload: UpdateSitePayload,
+) -> Result<(), GuiError> {
+    update_site_inner(&state, site_id, payload)
+}
+
+pub fn update_site_inner(
+    state: &VaultState,
+    site_id: i64,
+    payload: UpdateSitePayload,
+) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::sites::update(v, site_id, passhound_core::repo::sites::UpdateSite {
+        name: payload.name,
+        url: payload.url,
+        category: payload.category,
+        abbreviations: payload.abbreviations,
+        notes: payload.notes,
+    })?;
+    Ok(())
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratorOptionsPayload {
+    pub length: u8,
+    pub lowercase: bool,
+    pub uppercase: bool,
+    pub digits: bool,
+    pub symbols: bool,
+    pub avoid_ambiguous: bool,
+}
+
+#[tauri::command]
+pub fn generate_password(
+    payload: GeneratorOptionsPayload,
+) -> Result<String, GuiError> {
+    generate_password_inner(payload)
+}
+
+pub fn generate_password_inner(payload: GeneratorOptionsPayload) -> Result<String, GuiError> {
+    let opts = passhound_core::generator::GeneratorOptions {
+        length: payload.length,
+        lowercase: payload.lowercase,
+        uppercase: payload.uppercase,
+        digits: payload.digits,
+        symbols: payload.symbols,
+        avoid_ambiguous: payload.avoid_ambiguous,
+    };
+    let pw = passhound_core::generator::generate(opts)?;
+    // Drop Zeroizing here — the plaintext crosses the IPC as a String.
+    // Same privacy trade-off as reveal_password (4.1) and Recovery (4.8).
+    Ok(pw.to_string())
+}
+
+#[tauri::command]
+pub fn add_base_word(
+    state: State<'_, VaultState>,
+    text: String,
+) -> Result<BaseWordView, GuiError> {
+    add_base_word_inner(&state, text)
+}
+
+pub fn add_base_word_inner(
+    state: &VaultState,
+    text: String,
+) -> Result<BaseWordView, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let new = passhound_core::repo::base_words::manual_insert(v, &text)?;
+    // Fetch the decrypted view to get the plaintext word for the BaseWordView.
+    let decrypted = passhound_core::repo::base_words::fetch_decrypted(v)?;
+    let found = decrypted.into_iter().find(|d| d.id == new.id)
+        .ok_or_else(|| GuiError::Internal("inserted base word not found in fetch_decrypted".into()))?;
+    Ok(BaseWordView {
+        id: new.id,
+        word: found.word.to_string(),
+        is_favorite: new.is_favorite,
+        manual_override: new.manual_override,
+        usage_count: new.usage_count,
+        first_seen_at: new.first_seen_at.map(|d| d.to_rfc3339()),
+        last_seen_at: new.last_seen_at.map(|d| d.to_rfc3339()),
+    })
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -1541,7 +1652,6 @@ pub fn clear_recovery_feedback_inner(
 mod tests {
     use super::*;
     use passhound_core::repo::{accounts, passwords, sites};
-    use passhound_core::repo::base_words;
     use tempfile::TempDir;
     use passhound_core::repo::eras;
     use chrono::NaiveDate;
@@ -2133,7 +2243,11 @@ mod tests {
             notes: None,
             initial_password: Some("first".into()),
         }).unwrap();
-        add_password_inner(&state, aid, "second").unwrap();
+        add_password_inner(&state, AddPasswordPayload {
+            account_id: aid,
+            plaintext: "second".into(),
+            source: None,
+        }).unwrap();
 
         let detail = get_account_inner(&state, aid).unwrap();
         // Find the oldest row (the one that's currently retired).
@@ -2609,5 +2723,64 @@ mod tests {
             "expected BaseWordPool top-20 count to not decrease after positive feedback: baseline={}, after={}",
             baseline_top, after_top
         );
+    }
+
+    #[test]
+    fn update_site_round_trip_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        let site = {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            sites::create(v, sites::NewSite {
+                name: "Reddit".into(),
+                ..Default::default()
+            }).unwrap()
+        };
+
+        update_site_inner(&state, site.id, UpdateSitePayload {
+            name: "Old Reddit".into(),
+            url: Some("old.reddit.com".into()),
+            category: Some("Forum".into()),
+            abbreviations: vec!["OR".into()],
+            notes: Some("legacy".into()),
+        }).unwrap();
+
+        let guard = state.vault.lock().unwrap();
+        let v = guard.as_ref().unwrap();
+        let got = sites::get(v, site.id).unwrap();
+        assert_eq!(got.name, "Old Reddit");
+        assert_eq!(got.category.as_deref(), Some("Forum"));
+    }
+
+    #[test]
+    fn generate_password_round_trip_via_ipc() {
+        let pw = generate_password_inner(GeneratorOptionsPayload {
+            length: 16,
+            lowercase: true,
+            uppercase: true,
+            digits: true,
+            symbols: true,
+            avoid_ambiguous: false,
+        }).unwrap();
+        assert_eq!(pw.len(), 16);
+    }
+
+    #[test]
+    fn add_base_word_round_trip_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        let view = add_base_word_inner(&state, "MoonBeam".into()).unwrap();
+        assert!(view.is_favorite);
+        assert!(view.manual_override);
+        assert_eq!(view.usage_count, 0);
+
+        // Verify duplicate rejection.
+        let err = add_base_word_inner(&state, "moonbeam".into()).unwrap_err();
+        let _ = err;  // Some GuiError variant; the exact mapping depends on existing From impls.
     }
 }

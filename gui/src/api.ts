@@ -20,6 +20,8 @@ import type {
   SettingsView,
   SettingChange,
   RecordFeedbackPayload,
+  UpdateSitePayload,
+  GeneratorOptionsPayload,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -144,7 +146,8 @@ export const api = {
     alias: fields.alias ?? null,
     notes: fields.notes ?? null,
   } }),
-  addPassword: (accountId: number, plaintext: string) => call<number>("add_password", { accountId, plaintext }),
+  addPassword: (accountId: number, plaintext: string, source?: string) =>
+    call<number>("add_password", { payload: { accountId, plaintext, source: source ?? null } }),
   promotePassword: (historyId: number) => call<void>("promote_password", { historyId }),
 
   // Native save dialog via @tauri-apps/plugin-dialog. Returns null if user cancels.
@@ -185,4 +188,12 @@ export const api = {
   recordRecoveryFeedback: (payload: RecordFeedbackPayload) =>
     call<void>("record_recovery_feedback", { payload }),
   clearRecoveryFeedback: () => call<number>("clear_recovery_feedback"),
+
+  // Phase 4.14 — Small items
+  updateSite: (siteId: number, payload: UpdateSitePayload) =>
+    call<void>("update_site", { siteId, payload }),
+  generatePassword: (payload: GeneratorOptionsPayload) =>
+    call<string>("generate_password", { payload }),
+  addBaseWord: (text: string) =>
+    call<BaseWordView>("add_base_word", { text }),
 };

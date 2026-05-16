@@ -53,6 +53,9 @@ fn main() {
             change_master_password,
             record_recovery_feedback,
             clear_recovery_feedback,
+            update_site,
+            generate_password,
+            add_base_word,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
