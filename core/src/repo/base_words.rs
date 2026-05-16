@@ -78,6 +78,51 @@ pub fn demote(vault: &Vault, id: i64) -> Result<()> {
     common::ensure_affected(n)
 }
 
+/// Manually add a base word to the favorites pool. Encrypts under the vault key,
+/// inserts a row with is_favorite=1, manual_override=1, usage_count=0, and
+/// a casing_mask derived from the typed text. Returns the new BaseWord.
+pub fn manual_insert(vault: &Vault, text: &str) -> Result<BaseWord> {
+    let key = vault.require_key()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(Error::InvalidInput("base word must not be empty".into()));
+    }
+    if trimmed.len() > 64 {
+        return Err(Error::InvalidInput("base word must be 64 chars or fewer".into()));
+    }
+    let canonical = trimmed.to_lowercase();
+    // Reject duplicates by decrypted-word equality (mirrors upsert_aggregated's dedup).
+    let existing = fetch_decrypted(vault)?;
+    if existing.iter().any(|w| w.word.as_str() == canonical) {
+        return Err(Error::AlreadyExists);
+    }
+    let casing_mask = compute_casing_mask(trimmed);
+    let now = Utc::now();
+    let (ct, nonce) = aead::encrypt(key.as_bytes(), canonical.as_bytes())?;
+    vault.conn().execute(
+        "INSERT INTO base_words (word_encrypted, word_nonce, is_favorite,
+         first_seen_at, last_seen_at, usage_count, manual_override, casing_mask)
+         VALUES (?1, ?2, 1, ?3, ?4, 0, 1, ?5)",
+        params![
+            ct,
+            nonce.as_slice(),
+            now.to_rfc3339(),
+            now.to_rfc3339(),
+            casing_mask as i64,
+        ],
+    )?;
+    let id = vault.conn().last_insert_rowid();
+    Ok(BaseWord {
+        id,
+        is_favorite: true,
+        manual_override: true,
+        first_seen_at: Some(now),
+        last_seen_at: Some(now),
+        usage_count: 0,
+        casing_mask,
+    })
+}
+
 /// Upsert a token into the base_words table. Encrypts the word under the vault key.
 /// Existing rows (matched by decrypted-word equality) get usage_count overwritten and
 /// last_seen_at updated. The caller (analyze) is responsible for transaction boundaries.
@@ -307,6 +352,37 @@ mod tests {
             let roundtrip = apply_casing_mask(&canonical, mask);
             assert_eq!(&roundtrip, *word, "round trip failed for '{word}'");
         }
+    }
+
+    #[test]
+    fn manual_insert_round_trip() {
+        let (_tmp, v) = vault();
+        let new = manual_insert(&v, "MoonBeam").unwrap();
+        assert!(new.is_favorite);
+        assert!(new.manual_override);
+        assert_eq!(new.usage_count, 0);
+        assert_eq!(new.casing_mask, 0b00010001, "MoonBeam casing mask should match");
+
+        let words = list(&v).unwrap();
+        assert!(words.iter().any(|w| w.id == new.id && w.is_favorite));
+
+        let decrypted = fetch_decrypted(&v).unwrap();
+        assert!(decrypted.iter().any(|w| w.word.as_str() == "moonbeam"));
+    }
+
+    #[test]
+    fn manual_insert_rejects_duplicate() {
+        let (_tmp, v) = vault();
+        manual_insert(&v, "MoonBeam").unwrap();
+        let err = manual_insert(&v, "moonbeam").unwrap_err();
+        assert!(matches!(err, Error::AlreadyExists));
+    }
+
+    #[test]
+    fn manual_insert_rejects_empty() {
+        let (_tmp, v) = vault();
+        let err = manual_insert(&v, "   ").unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
     }
 
     #[test]

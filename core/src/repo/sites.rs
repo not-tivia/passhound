@@ -25,6 +25,15 @@ pub struct NewSite {
     pub notes: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct UpdateSite {
+    pub name: String,
+    pub url: Option<String>,
+    pub category: Option<String>,
+    pub abbreviations: Vec<String>,
+    pub notes: Option<String>,
+}
+
 pub fn create(vault: &Vault, new: NewSite) -> Result<Site> {
     if new.name.trim().is_empty() {
         return Err(Error::InvalidInput("site name required".into()));
@@ -47,6 +56,20 @@ pub fn create(vault: &Vault, new: NewSite) -> Result<Site> {
         notes: new.notes,
         created_at: now,
     })
+}
+
+pub fn update(vault: &Vault, id: i64, changes: UpdateSite) -> Result<()> {
+    if changes.name.trim().is_empty() {
+        return Err(Error::InvalidInput("site name required".into()));
+    }
+    let abbr_json = serde_json::to_string(&changes.abbreviations)
+        .map_err(|e| Error::InvalidInput(format!("abbreviations: {e}")))?;
+    let n = vault.conn().execute(
+        "UPDATE sites SET name = ?1, url = ?2, category = ?3,
+         abbreviations = ?4, notes = ?5 WHERE id = ?6",
+        params![changes.name, changes.url, changes.category, abbr_json, changes.notes, id],
+    )?;
+    common::ensure_affected(n)
 }
 
 pub fn get(vault: &Vault, id: i64) -> Result<Site> {
@@ -166,5 +189,41 @@ mod tests {
         assert!(missing.is_none());
         let empty = find_by_name(&v, "   ").unwrap();
         assert!(empty.is_none());
+    }
+
+    #[test]
+    fn update_changes_fields_round_trip() {
+        let (_tmp, v) = vault();
+        let s = create(&v, NewSite {
+            name: "RuneScape".into(),
+            url: Some("runescape.com".into()),
+            category: Some("Gaming".into()),
+            abbreviations: vec!["RS".into()],
+            notes: None,
+        }).unwrap();
+
+        update(&v, s.id, UpdateSite {
+            name: "Runescape Classic".into(),
+            url: Some("classic.runescape.com".into()),
+            category: Some("MMO".into()),
+            abbreviations: vec!["RSC".into(), "rs07".into()],
+            notes: Some("legacy account".into()),
+        }).unwrap();
+
+        let got = get(&v, s.id).unwrap();
+        assert_eq!(got.name, "Runescape Classic");
+        assert_eq!(got.url.as_deref(), Some("classic.runescape.com"));
+        assert_eq!(got.category.as_deref(), Some("MMO"));
+        assert_eq!(got.abbreviations, vec!["RSC".to_string(), "rs07".to_string()]);
+        assert_eq!(got.notes.as_deref(), Some("legacy account"));
+    }
+
+    #[test]
+    fn update_returns_not_found_for_missing_id() {
+        let (_tmp, v) = vault();
+        let err = update(&v, 999, UpdateSite {
+            name: "x".into(), ..Default::default()
+        }).unwrap_err();
+        assert!(matches!(err, Error::NotFound));
     }
 }
