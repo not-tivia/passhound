@@ -65,7 +65,7 @@ fn phase1_vault_auto_upgrades_on_open() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(val.as_slice(), b"7");
+    assert_eq!(val.as_slice(), b"8");
 
     // Confirm the new column exists.
     let mut stmt = v.conn().prepare("PRAGMA table_info(password_history)").unwrap();

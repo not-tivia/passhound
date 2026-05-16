@@ -70,6 +70,21 @@ impl RuleId {
             RuleId::OriginalCasing  => "OriginalCasing",
         }
     }
+    /// Inverse of `tag()`. Returns `None` for unknown strings.
+    pub fn from_tag(s: &str) -> Option<RuleId> {
+        match s {
+            "G"    => Some(RuleId::BaseWordPool),
+            "D"    => Some(RuleId::WordCombine),
+            "CASE" => Some(RuleId::CaseVariations),
+            "B"    => Some(RuleId::SpecialSuffix),
+            "E"    => Some(RuleId::SiteAffix),
+            "F"    => Some(RuleId::NumberIncrement),
+            "LEET" => Some(RuleId::LeetSwap),
+            "H"    => Some(RuleId::EraBoost),
+            "ORIG" => Some(RuleId::OriginalCasing),
+            _      => None,
+        }
+    }
 }
 
 /// Hints from the CLI; everything optional.
@@ -151,5 +166,25 @@ mod tests {
         assert!(c.site.is_none());
         assert_eq!(c.limit, 0);
         assert!(!c.require_symbol);
+    }
+
+    #[test]
+    fn rule_id_tag_from_tag_round_trip() {
+        for r in [
+            RuleId::BaseWordPool,
+            RuleId::WordCombine,
+            RuleId::CaseVariations,
+            RuleId::SpecialSuffix,
+            RuleId::SiteAffix,
+            RuleId::NumberIncrement,
+            RuleId::LeetSwap,
+            RuleId::EraBoost,
+            RuleId::OriginalCasing,
+        ] {
+            let t = r.tag();
+            let back = RuleId::from_tag(t);
+            assert_eq!(back, Some(r), "round trip failed for {:?}", r);
+        }
+        assert_eq!(RuleId::from_tag("nonexistent"), None);
     }
 }
