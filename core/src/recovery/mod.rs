@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 
 pub mod analyze;
 pub mod clean_pattern;
+pub mod feedback;
 pub mod generators;
 pub mod pipeline;
 pub mod pool;
