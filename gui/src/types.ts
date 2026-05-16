@@ -18,6 +18,7 @@ export interface AccountDetail {
   site_url: string | null;
   site_category: string | null;
   site_abbreviations: string[];
+  site_notes: string | null;
   username: string | null;
   display_name: string | null;
   alias: string | null;

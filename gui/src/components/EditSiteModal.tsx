@@ -16,7 +16,7 @@ export default function EditSiteModal({ detail, onClose, onSaved, onLockedError 
   const [url, setUrl] = useState(detail.site_url ?? "");
   const [category, setCategory] = useState(detail.site_category ?? "");
   const [abbreviations, setAbbreviations] = useState(detail.site_abbreviations.join(", "));
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(detail.site_notes ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
