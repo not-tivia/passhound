@@ -6,6 +6,7 @@
 
 use crate::crypto::aead::{self, NONCE_LEN};
 use crate::error::{Error, Result};
+use crate::repo::common;
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
 use rusqlite::params;
@@ -105,10 +106,7 @@ pub fn decrypt(vault: &Vault, id: i64) -> Result<(AttachmentSummary, Zeroizing<V
          FROM attachments WHERE id = ?1",
         params![id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
-    ).map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
-        other => Error::from(other),
-    })?;
+    ).map_err(common::not_found_or_db)?;
     if nonce_vec.len() != NONCE_LEN {
         return Err(Error::InvalidInput("malformed attachment nonce".into()));
     }
@@ -134,10 +132,7 @@ pub fn delete(vault: &Vault, id: i64) -> Result<()> {
         "DELETE FROM attachments WHERE id = ?1",
         params![id],
     )?;
-    if n == 0 {
-        return Err(Error::NotFound);
-    }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 #[cfg(test)]

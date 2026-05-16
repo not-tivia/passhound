@@ -1,5 +1,6 @@
 use crate::crypto::aead::{self, NONCE_LEN};
 use crate::error::{Error, Result};
+use crate::repo::common;
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
 use rusqlite::params;
@@ -88,8 +89,7 @@ pub fn retire(vault: &Vault, id: i64, when: DateTime<Utc>) -> Result<()> {
         "UPDATE password_history SET retired_at = ?1 WHERE id = ?2 AND retired_at IS NULL",
         params![when.to_rfc3339(), id],
     )?;
-    if n == 0 { return Err(Error::NotFound); }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 /// Promote a history row to current. Retires any existing current for that account
@@ -101,10 +101,7 @@ pub fn promote(vault: &Vault, history_id: i64) -> Result<()> {
         "SELECT account_id FROM password_history WHERE id = ?1",
         params![history_id],
         |row| row.get(0),
-    ).map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
-        other => other.into(),
-    })?;
+    ).map_err(common::not_found_or_db)?;
 
     tx.execute(
         "UPDATE password_history SET retired_at = ?1
@@ -128,10 +125,7 @@ pub fn delete(vault: &Vault, id: i64) -> Result<()> {
         "DELETE FROM password_history WHERE id = ?1",
         params![id],
     )?;
-    if n == 0 {
-        return Err(Error::NotFound);
-    }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 /// Return the current (non-retired) password's plaintext for an account, if any.
@@ -221,10 +215,7 @@ pub fn decrypt_record(vault: &Vault, id: i64) -> Result<Zeroizing<String>> {
         "SELECT password_encrypted, password_nonce FROM password_history WHERE id = ?1",
         params![id],
         |r| Ok((r.get(0)?, r.get(1)?)),
-    ).map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
-        other => Error::from(other),
-    })?;
+    ).map_err(common::not_found_or_db)?;
     if nonce_vec.len() != NONCE_LEN {
         return Err(Error::InvalidInput("malformed nonce".into()));
     }

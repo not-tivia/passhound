@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 use crate::error::{Error, Result};
+use crate::repo::common;
 use crate::vault::Vault;
 
 pub struct Tag {
@@ -45,10 +46,7 @@ pub fn get(vault: &Vault, id: i64) -> Result<Tag> {
                     .unwrap_or_else(|_| Utc::now()),
             })
         },
-    ).map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
-        other => other.into(),
-    })
+    ).map_err(common::not_found_or_db)
 }
 
 pub fn list(vault: &Vault) -> Result<Vec<Tag>> {
@@ -118,8 +116,7 @@ pub fn rename(vault: &Vault, id: i64, new_name: &str) -> Result<()> {
         "UPDATE tags SET name = ?1 WHERE id = ?2",
         params![name, id],
     )?;
-    if n == 0 { return Err(Error::NotFound); }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 pub fn delete(vault: &Vault, id: i64) -> Result<()> {
@@ -127,8 +124,7 @@ pub fn delete(vault: &Vault, id: i64) -> Result<()> {
         "DELETE FROM tags WHERE id = ?1",
         params![id],
     )?;
-    if n == 0 { return Err(Error::NotFound); }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 fn validate_name(raw: &str) -> Result<String> {

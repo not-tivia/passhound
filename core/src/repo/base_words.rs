@@ -1,5 +1,6 @@
 use crate::crypto::aead::{self, NONCE_LEN};
 use crate::error::{Error, Result};
+use crate::repo::common;
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
 use rusqlite::params;
@@ -65,8 +66,7 @@ pub fn promote(vault: &Vault, id: i64) -> Result<()> {
         "UPDATE base_words SET is_favorite = 1, manual_override = 1 WHERE id = ?1",
         params![id],
     )?;
-    if n == 0 { return Err(Error::NotFound); }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 /// Manually mark a base word as NOT a favorite. Same manual_override semantics as promote.
@@ -75,8 +75,7 @@ pub fn demote(vault: &Vault, id: i64) -> Result<()> {
         "UPDATE base_words SET is_favorite = 0, manual_override = 1 WHERE id = ?1",
         params![id],
     )?;
-    if n == 0 { return Err(Error::NotFound); }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 /// Upsert a token into the base_words table. Encrypts the word under the vault key.
