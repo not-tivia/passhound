@@ -44,10 +44,22 @@ fn pragma_secure_delete_is_on_after_open() {
         let _ = Vault::create(&path, b"hunter2").unwrap();
         // Drop the vault so Vault::open below uses a fresh connection.
     }
-    let v = Vault::open(&path).unwrap();
 
-    // secure_delete is a per-connection PRAGMA that Vault::open sets on its
-    // own connection. Query it through the Vault's exposed conn() accessor.
+    // Control: a sibling Connection that opens the file directly does NOT
+    // get secure_delete = ON. Confirms the PRAGMA is per-connection (not
+    // persisted in the file header) and that any positive reading from
+    // Vault::open's connection below is a real signal, not a SQLite default.
+    let sibling = Connection::open(&path).unwrap();
+    let sibling_val: i64 = sibling
+        .query_row("PRAGMA secure_delete", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        sibling_val, 0,
+        "sibling Connection should default to secure_delete=0, got {sibling_val}"
+    );
+
+    // Real check: the connection returned by Vault::open has the PRAGMA set.
+    let v = Vault::open(&path).unwrap();
     let val: i64 = v
         .conn()
         .query_row("PRAGMA secure_delete", [], |r| r.get(0))
