@@ -58,8 +58,8 @@ pub fn record(vault: &Vault, event: FeedbackEvent) -> Result<()> {
 
 /// Delete every feedback row. Returns the number of rows deleted.
 pub fn clear(vault: &Vault) -> Result<usize> {
-    vault.conn().execute("DELETE FROM recovery_feedback", [])?;
-    Ok(vault.conn().changes() as usize)
+    let n = vault.conn().execute("DELETE FROM recovery_feedback", [])?;
+    Ok(n)
 }
 
 /// Compute a per-rule multiplier from accumulated feedback. Rules with fewer
