@@ -200,3 +200,18 @@ export type SettingChange =
   | { key: "clipboard_clear_seconds"; value: number }
   | { key: "analyze_top_n"; value: number }
   | { key: "default_reveal"; value: boolean };
+
+// Phase 4.12 — Recovery feedback
+
+export interface RecordFeedbackPayload {
+  accountId: number | null;
+  provenance: string[];
+  score: number;
+  rank: number;
+  worked: boolean;
+  length: number;
+  hasDigit: boolean;
+  hasSymbol: boolean;
+  hasUpper: boolean;
+  hasLower: boolean;
+}

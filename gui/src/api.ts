@@ -19,6 +19,7 @@ import type {
   AnalyzeReportView,
   SettingsView,
   SettingChange,
+  RecordFeedbackPayload,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -179,4 +180,9 @@ export const api = {
   // Phase 4.11 — Master password change
   changeMasterPassword: (currentPw: string, newPw: string) =>
     call<void>("change_master_password", { currentPw, newPw }),
+
+  // Phase 4.12 — Recovery feedback
+  recordRecoveryFeedback: (payload: RecordFeedbackPayload) =>
+    call<void>("record_recovery_feedback", { payload }),
+  clearRecoveryFeedback: () => call<number>("clear_recovery_feedback"),
 };

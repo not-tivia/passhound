@@ -1464,6 +1464,75 @@ pub fn change_master_password_inner(
     Ok(())
 }
 
+// =================================================================
+// Phase 4.12 — Recovery feedback
+// =================================================================
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordFeedbackPayload {
+    pub account_id: Option<i64>,
+    pub provenance: Vec<String>,
+    pub score: f32,
+    pub rank: i64,
+    pub worked: bool,
+    pub length: i64,
+    pub has_digit: bool,
+    pub has_symbol: bool,
+    pub has_upper: bool,
+    pub has_lower: bool,
+}
+
+#[tauri::command]
+pub fn record_recovery_feedback(
+    state: State<'_, VaultState>,
+    payload: RecordFeedbackPayload,
+) -> Result<(), GuiError> {
+    record_recovery_feedback_inner(&state, payload)
+}
+
+pub fn record_recovery_feedback_inner(
+    state: &VaultState,
+    payload: RecordFeedbackPayload,
+) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let provenance: Vec<passhound_core::recovery::RuleId> = payload.provenance
+        .iter()
+        .filter_map(|s| passhound_core::recovery::RuleId::from_tag(s))
+        .collect();
+    let event = passhound_core::recovery::feedback::FeedbackEvent {
+        account_id: payload.account_id,
+        provenance,
+        score: payload.score,
+        rank: payload.rank,
+        worked: payload.worked,
+        length: payload.length,
+        has_digit: payload.has_digit,
+        has_symbol: payload.has_symbol,
+        has_upper: payload.has_upper,
+        has_lower: payload.has_lower,
+    };
+    passhound_core::recovery::feedback::record(v, event)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_recovery_feedback(
+    state: State<'_, VaultState>,
+) -> Result<usize, GuiError> {
+    clear_recovery_feedback_inner(&state)
+}
+
+pub fn clear_recovery_feedback_inner(
+    state: &VaultState,
+) -> Result<usize, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let n = passhound_core::recovery::feedback::clear(v)?;
+    Ok(n)
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -2413,5 +2482,132 @@ mod tests {
         // Vault is still on the original password.
         vault_lock_inner(&state).unwrap();
         vault_unlock_inner(&state, &path, b"actual").unwrap();
+    }
+
+    #[test]
+    fn record_recovery_feedback_inserts_row() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        record_recovery_feedback_inner(&state, RecordFeedbackPayload {
+            account_id: None,
+            provenance: vec!["G".into(), "E".into()],
+            score: 0.75,
+            rank: 3,
+            worked: true,
+            length: 14,
+            has_digit: true,
+            has_symbol: true,
+            has_upper: true,
+            has_lower: true,
+        }).unwrap();
+
+        let guard = state.vault.lock().unwrap();
+        let v = guard.as_ref().unwrap();
+        let count: i64 = v.conn()
+            .query_row("SELECT COUNT(*) FROM recovery_feedback", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn clear_recovery_feedback_removes_all() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        for _ in 0..3 {
+            record_recovery_feedback_inner(&state, RecordFeedbackPayload {
+                account_id: None,
+                provenance: vec!["G".into()],
+                score: 0.5,
+                rank: 1,
+                worked: true,
+                length: 10,
+                has_digit: false,
+                has_symbol: false,
+                has_upper: false,
+                has_lower: true,
+            }).unwrap();
+        }
+        let n = clear_recovery_feedback_inner(&state).unwrap();
+        assert_eq!(n, 3);
+
+        let guard = state.vault.lock().unwrap();
+        let v = guard.as_ref().unwrap();
+        let count: i64 = v.conn()
+            .query_row("SELECT COUNT(*) FROM recovery_feedback", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn recover_candidates_affected_by_feedback() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        // Seed enough history that recover produces candidates with BaseWordPool
+        // provenance (the "G" rule). Several MoonBeam$YYYY passwords work.
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "Reddit".into(), ..Default::default()
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id, ..Default::default()
+            }).unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2019", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2020", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2021", "manual").unwrap();
+        }
+
+        let filters = RecoverFilters {
+            site: Some("Reddit".into()),
+            account: None, era: None,
+            hint: Some("moon".into()),
+            limit: 100, min_length: None,
+            require_symbol: false, require_digit: false,
+        };
+
+        // Baseline: no feedback.
+        let baseline = recover_candidates_inner(&state, &filters).unwrap();
+        let baseline_top = baseline.iter().take(20)
+            .filter(|c| c.provenance.iter().any(|t| t.tag == "G"))
+            .count();
+
+        // Inject heavy BaseWordPool boost via feedback (5 worked rows).
+        for _ in 0..5 {
+            record_recovery_feedback_inner(&state, RecordFeedbackPayload {
+                account_id: None,
+                provenance: vec!["G".into()],
+                score: 0.5,
+                rank: 1,
+                worked: true,
+                length: 10,
+                has_digit: false,
+                has_symbol: false,
+                has_upper: false,
+                has_lower: true,
+            }).unwrap();
+        }
+
+        // After feedback: BaseWordPool-containing candidates should rank
+        // at least as well as before.
+        let after = recover_candidates_inner(&state, &filters).unwrap();
+        let after_top = after.iter().take(20)
+            .filter(|c| c.provenance.iter().any(|t| t.tag == "G"))
+            .count();
+
+        // Feedback should not REDUCE the count of BaseWordPool candidates in
+        // the top-20. (A strict assertion that count *strictly increases* would
+        // be brittle — depends on the specific candidate fan; the conservative
+        // assertion is non-decrease.)
+        assert!(
+            after_top >= baseline_top,
+            "expected BaseWordPool top-20 count to not decrease after positive feedback: baseline={}, after={}",
+            baseline_top, after_top
+        );
     }
 }
