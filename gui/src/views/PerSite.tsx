@@ -7,6 +7,7 @@ import EditSiteModal from "../components/EditSiteModal";
 import PasswordCell from "../components/PasswordCell";
 import TagChip from "../components/TagChip";
 import TagPicker from "../components/TagPicker";
+import { useToast } from "../components/Toast";
 import type { AccountDetail, GuiError, TagSummary } from "../types";
 
 interface PerSiteProps {
@@ -24,6 +25,7 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
   const [editing, setEditing] = useState(false);
   const [editSiteOpen, setEditSiteOpen] = useState(false);
   const [addingPassword, setAddingPassword] = useState(false);
+  const toast = useToast();
 
   const loadDetail = useCallback(() => {
     setDetail(null);
@@ -174,7 +176,23 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
         <div className="per-site__section-label">Current</div>
         {current ? (
           <div className="per-site__entry">
-            <PasswordCell historyId={current.id} onLockedError={onLockedError} onDelete={loadDetail} />
+            <PasswordCell
+              historyId={current.id}
+              onLockedError={onLockedError}
+              onDelete={loadDetail}
+              onEditCurrent={async (newPlaintext) => {
+                try {
+                  await api.addPassword(accountId, newPlaintext, "manual-edit");
+                  toast.show("Password updated. Old value moved to history.");
+                  loadDetail();
+                } catch (e) {
+                  const err = e as GuiError;
+                  if (err.kind === "Locked") onLockedError();
+                  else toast.show(`Update failed: ${err.message ?? err.kind}`);
+                  throw e;
+                }
+              }}
+            />
             <div className="per-site__date">{current.created_at.slice(0, 10)}</div>
           </div>
         ) : addingPassword ? (

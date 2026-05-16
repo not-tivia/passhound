@@ -1909,3 +1909,36 @@ select option {
   flex: 0 0 32px;
   height: 28px;
 }
+
+/* ============================================================================
+   Phase 4.14 — in-place password edit
+   ============================================================================ */
+
+.pwd-cell__btn--edit {
+  color: var(--accent, #ccaa66);
+  visibility: hidden;
+}
+.per-site__entry:hover .pwd-cell__btn--edit {
+  visibility: visible;
+}
+.pwd-cell__btn--edit:hover:not(:disabled) {
+  background: #2a2a1a;
+  color: var(--text-0);
+}
+
+.pwd-cell__edit-input {
+  font-family: monospace;
+  font-size: 12px;
+  width: 200px;
+  background: #14141a;
+  border: 1px solid #3a3a44;
+  padding: 3px 8px;
+  color: var(--text-0);
+}
+.pwd-cell__edit-input:focus {
+  outline: none;
+  border-color: var(--border-hover);
+}
+.pwd-cell__edit-input:disabled {
+  opacity: 0.5;
+}

@@ -9,11 +9,15 @@ interface PasswordCellProps {
   onLockedError: () => void;
   onDelete: () => void;
   onPromote?: () => void;
+  onEditCurrent?: (newPlaintext: string) => Promise<void>;
 }
 
-export default function PasswordCell({ historyId, onLockedError, onDelete, onPromote }: PasswordCellProps) {
+export default function PasswordCell({ historyId, onLockedError, onDelete, onPromote, onEditCurrent }: PasswordCellProps) {
   const [revealed, setRevealed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
   const toast = useToast();
   const { settings } = useSettings();
 
@@ -68,6 +72,57 @@ export default function PasswordCell({ historyId, onLockedError, onDelete, onPro
     }
   };
 
+  const handleEditOpen = async () => {
+    let pt = revealed;
+    if (pt === null) {
+      pt = await fetchPlaintext();
+      if (pt === null) return;
+      setRevealed(pt);
+    }
+    setEditValue(pt);
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    if (!editValue.trim()) return;
+    setEditBusy(true);
+    try {
+      await onEditCurrent!(editValue);
+      setEditing(false);
+      setEditValue("");
+    } catch {
+      // The parent's onEditCurrent callback handles toast / error display.
+      // If it threw, we stay in editing mode so the user can retry.
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="pwd-cell">
+        <input
+          type="text"
+          className="pwd-cell__edit-input"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          disabled={editBusy}
+          autoFocus
+        />
+        <button className="pwd-cell__btn" onClick={handleSave} disabled={editBusy || !editValue.trim()}>
+          Save
+        </button>
+        <button
+          className="pwd-cell__btn"
+          onClick={() => { setEditing(false); setEditValue(""); }}
+          disabled={editBusy}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="pwd-cell">
       <span className="pwd-cell__value">
@@ -79,6 +134,17 @@ export default function PasswordCell({ historyId, onLockedError, onDelete, onPro
       <button className="pwd-cell__btn" onClick={handleCopy} disabled={busy}>
         copy
       </button>
+      {onEditCurrent && (
+        <button
+          className="pwd-cell__btn pwd-cell__btn--edit"
+          onClick={handleEditOpen}
+          disabled={busy}
+          aria-label="Edit current password"
+          title="Edit current password"
+        >
+          &#x270F; Edit
+        </button>
+      )}
       {onPromote && (
         <button
           className="pwd-cell__btn pwd-cell__btn--promote"
