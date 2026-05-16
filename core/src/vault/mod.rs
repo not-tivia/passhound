@@ -35,7 +35,17 @@ impl Vault {
             return Err(Error::AlreadyExists);
         }
         let mut conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(path, perms)?;
+        }
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON; \
+             PRAGMA synchronous = FULL; \
+             PRAGMA secure_delete = ON;"
+        )?;
 
         let salt = kdf::generate_salt();
         let key_bytes = kdf::derive_key(password, &salt)?;
@@ -75,7 +85,11 @@ impl Vault {
             return Err(Error::NotFound);
         }
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON; \
+             PRAGMA synchronous = FULL; \
+             PRAGMA secure_delete = ON;"
+        )?;
         let tx = conn.unchecked_transaction()?;
         schema::apply_migrations(&tx)?;
         tx.commit()?;
