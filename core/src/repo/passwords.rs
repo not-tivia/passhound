@@ -376,4 +376,18 @@ mod tests {
         assert_eq!(remaining.len(), 1, "only one history row should remain");
         assert!(matches!(delete(&v, p1.id), Err(crate::error::Error::NotFound)));
     }
+
+    #[test]
+    fn current_plaintext_on_locked_vault_returns_locked() {
+        let (_t, mut v, aid) = setup();
+        set_current(&v, aid, "hunter2", "manual").unwrap();
+
+        v.lock();
+        let result = current_plaintext(&v, aid);
+
+        assert!(
+            matches!(result, Err(crate::error::Error::Locked)),
+            "expected Err(Error::Locked), got {result:?}"
+        );
+    }
 }
