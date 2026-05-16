@@ -3,6 +3,7 @@ import { api } from "../api";
 import AccountFormModal from "../components/AccountFormModal";
 import AddPasswordInput from "../components/AddPasswordInput";
 import AttachmentsSection from "../components/AttachmentsSection";
+import EditSiteModal from "../components/EditSiteModal";
 import PasswordCell from "../components/PasswordCell";
 import TagChip from "../components/TagChip";
 import TagPicker from "../components/TagPicker";
@@ -13,13 +14,15 @@ interface PerSiteProps {
   onLockedError: () => void;
   onAccountDeleted: () => void;
   onRecoverAccount: (siteName: string, accountLabel: string | null) => void;
+  onSiteUpdated: () => void;
 }
 
-export default function PerSite({ accountId, onLockedError, onAccountDeleted, onRecoverAccount }: PerSiteProps) {
+export default function PerSite({ accountId, onLockedError, onAccountDeleted, onRecoverAccount, onSiteUpdated }: PerSiteProps) {
   const [detail, setDetail] = useState<AccountDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editSiteOpen, setEditSiteOpen] = useState(false);
   const [addingPassword, setAddingPassword] = useState(false);
 
   const loadDetail = useCallback(() => {
@@ -113,6 +116,13 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
             title="Open Recovery view pre-filled with this account"
           >
             Recover this password
+          </button>
+          <button
+            className="per-site__edit-site"
+            onClick={() => setEditSiteOpen(true)}
+            title="Edit site metadata"
+          >
+            Edit site
           </button>
           <button
             className="per-site__edit-account"
@@ -222,6 +232,17 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
           }}
           onClose={() => setEditing(false)}
           onSaved={() => { setEditing(false); loadDetail(); }}
+          onLockedError={onLockedError}
+        />
+      )}
+      {editSiteOpen && (
+        <EditSiteModal
+          detail={detail}
+          onClose={() => setEditSiteOpen(false)}
+          onSaved={() => {
+            loadDetail();
+            onSiteUpdated();
+          }}
           onLockedError={onLockedError}
         />
       )}

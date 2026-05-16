@@ -122,6 +122,7 @@ export default function Vault({ onLock }: VaultProps) {
                     setRecoveryInitial({ site: siteName, account: accountLabel ?? undefined });
                     setView("recovery");
                   }}
+                  onSiteUpdated={() => setRefreshKey((k) => k + 1)}
                 />
               )}
             </div>
