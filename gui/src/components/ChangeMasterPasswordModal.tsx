@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import PasswordGeneratorPopover from "./PasswordGeneratorPopover";
 import type { GuiError } from "../types";
 
 interface ChangeMasterPasswordModalProps {
@@ -17,6 +18,7 @@ export default function ChangeMasterPasswordModal({
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [busy, setBusy] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
   const [errorCurrent, setErrorCurrent] = useState<string | null>(null);
   const [errorNew, setErrorNew] = useState<string | null>(null);
   const [errorConfirm, setErrorConfirm] = useState<string | null>(null);
@@ -85,12 +87,24 @@ export default function ChangeMasterPasswordModal({
           )}
 
           <label>New:</label>
-          <input
-            type="password"
-            value={newPw}
-            onChange={(e) => setNewPw(e.target.value)}
-            disabled={busy}
-          />
+          <div className="modal__field-row">
+            <input
+              type="password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              disabled={busy}
+            />
+            <button
+              type="button"
+              onClick={() => setGenOpen(true)}
+              disabled={busy}
+              aria-label="Generate password"
+              title="Generate password"
+              className="modal__gen-btn"
+            >
+              {"\u{1F3B2}"}
+            </button>
+          </div>
           {errorNew && (
             <>
               <span></span>
@@ -125,6 +139,12 @@ export default function ChangeMasterPasswordModal({
             {busy ? "Re-encrypting…" : "Change"}
           </button>
         </div>
+        {genOpen && (
+          <PasswordGeneratorPopover
+            onChoose={(pw) => setNewPw(pw)}
+            onClose={() => setGenOpen(false)}
+          />
+        )}
       </div>
     </div>
   );

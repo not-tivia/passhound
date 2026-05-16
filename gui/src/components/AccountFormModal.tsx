@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import SitePicker from "./SitePicker";
+import PasswordGeneratorPopover from "./PasswordGeneratorPopover";
 import type { SiteSummary, GuiError } from "../types";
 
 interface AccountInitial {
@@ -35,6 +36,7 @@ export default function AccountFormModal({ mode, initial, onClose, onSaved, onLo
   const [initialPassword, setInitialPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
 
   const canSave = mode === "edit" || !!sitePicked;
 
@@ -119,12 +121,24 @@ export default function AccountFormModal({ mode, initial, onClose, onSaved, onLo
           {mode === "add" && (
             <>
               <label>Password:</label>
-              <input
-                type="text"
-                value={initialPassword}
-                onChange={(e) => setInitialPassword(e.target.value)}
-                placeholder="optional"
-              />
+              <div className="modal__field-row">
+                <input
+                  type="text"
+                  value={initialPassword}
+                  onChange={(e) => setInitialPassword(e.target.value)}
+                  placeholder="optional"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGenOpen(true)}
+                  disabled={busy}
+                  aria-label="Generate password"
+                  title="Generate password"
+                  className="modal__gen-btn"
+                >
+                  {"\u{1F3B2}"}
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -133,6 +147,12 @@ export default function AccountFormModal({ mode, initial, onClose, onSaved, onLo
           <button onClick={onClose} disabled={busy}>Cancel</button>
           <button onClick={handleSave} disabled={!canSave || busy}>Save</button>
         </div>
+        {genOpen && (
+          <PasswordGeneratorPopover
+            onChoose={(pw) => setInitialPassword(pw)}
+            onClose={() => setGenOpen(false)}
+          />
+        )}
       </div>
     </div>
   );

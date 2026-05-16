@@ -1830,3 +1830,82 @@ select option {
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* ============================================================================
+   Phase 4.14 — Password generator popover
+   ============================================================================ */
+.popover-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.popover {
+  background: var(--surface-1, #1a1a20);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 6px;
+  padding: 16px;
+  min-width: 320px;
+  max-width: 400px;
+}
+.popover__header {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-0, #d0d0d8);
+}
+.popover__field { margin: 8px 0; }
+.popover__field label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-1, #a0a0a8);
+  margin-bottom: 4px;
+}
+.popover__field input[type="range"] { width: 100%; }
+.popover__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+.popover__checks label {
+  font-size: 11px;
+  color: var(--text-0, #d0d0d8);
+}
+.popover__avoid {
+  display: block;
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--text-1, #a0a0a8);
+}
+.popover__output {
+  font-family: monospace;
+  font-size: 12px;
+  background: var(--surface-0, #0e0e14);
+  padding: 8px;
+  margin: 8px 0;
+  border-radius: 4px;
+  word-break: break-all;
+}
+.popover__error {
+  color: #d46a6a;
+  font-size: 11px;
+  margin: 8px 0;
+}
+.popover__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+.modal__field-row {
+  display: flex;
+  gap: 6px;
+}
+.modal__gen-btn {
+  flex: 0 0 32px;
+  height: 28px;
+}
