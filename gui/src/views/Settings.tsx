@@ -6,6 +6,7 @@ import SettingNumberInput from "../components/SettingNumberInput";
 import SettingCheckbox from "../components/SettingCheckbox";
 import ChangeMasterPasswordModal from "../components/ChangeMasterPasswordModal";
 import ConfirmReunlockModal from "../components/ConfirmReunlockModal";
+import ResetLearningModal from "../components/ResetLearningModal";
 import { api } from "../api";
 import type { GuiError, SettingChange } from "../types";
 
@@ -19,6 +20,7 @@ export default function Settings({ onLockedError, onLock }: SettingsProps) {
   const toast = useToast();
   const [changeOpen, setChangeOpen] = useState(false);
   const [confirmReunlockOpen, setConfirmReunlockOpen] = useState(false);
+  const [resetLearningOpen, setResetLearningOpen] = useState(false);
 
   const save = async (change: SettingChange) => {
     try {
@@ -87,6 +89,18 @@ export default function Settings({ onLockedError, onLock }: SettingsProps) {
         />
       </SettingsSection>
 
+      <SettingsSection title="LEARNING">
+        <div className="settings-row">
+          <label className="settings-row__label">Reset learning</label>
+          <button
+            className="settings-row__change-pw-btn"
+            onClick={() => setResetLearningOpen(true)}
+          >
+            Reset…
+          </button>
+        </div>
+      </SettingsSection>
+
       <div className="settings__footnote">All settings save automatically as you type.</div>
       {changeOpen && (
         <ChangeMasterPasswordModal
@@ -103,6 +117,22 @@ export default function Settings({ onLockedError, onLock }: SettingsProps) {
           onReunlock={() => {
             setConfirmReunlockOpen(false);
             onLock();
+          }}
+        />
+      )}
+      {resetLearningOpen && (
+        <ResetLearningModal
+          onClose={() => setResetLearningOpen(false)}
+          onConfirmed={async () => {
+            try {
+              const n = await api.clearRecoveryFeedback();
+              toast.show(`Cleared ${n} feedback rows. Auto-tune reset to neutral.`);
+              setResetLearningOpen(false);
+            } catch (e) {
+              const err = e as GuiError;
+              if (err.kind === "Locked") onLockedError();
+              else toast.show(`Reset failed: ${err.message ?? err.kind}`);
+            }
           }}
         />
       )}
