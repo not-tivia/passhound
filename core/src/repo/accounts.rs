@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::repo::common;
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
 use rusqlite::params;
@@ -51,10 +52,7 @@ pub fn get(vault: &Vault, id: i64) -> Result<Account> {
         "SELECT id, site_id, username, display_name, alias, notes, created_at FROM accounts WHERE id = ?1",
         params![id],
         row_to_account,
-    ).map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
-        other => Error::from(other),
-    })
+    ).map_err(common::not_found_or_db)
 }
 
 /// Fields to update on an existing account. Each `Option<String>` is the new value
@@ -73,10 +71,7 @@ pub fn update(vault: &Vault, id: i64, changes: UpdateAccount) -> Result<()> {
          WHERE id = ?5",
         params![changes.username, changes.display_name, changes.alias, changes.notes, id],
     )?;
-    if n == 0 {
-        return Err(Error::NotFound);
-    }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 pub fn delete(vault: &Vault, id: i64) -> Result<()> {
@@ -84,10 +79,7 @@ pub fn delete(vault: &Vault, id: i64) -> Result<()> {
         "DELETE FROM accounts WHERE id = ?1",
         params![id],
     )?;
-    if n == 0 {
-        return Err(Error::NotFound);
-    }
-    Ok(())
+    common::ensure_affected(n)
 }
 
 pub fn list_all(vault: &Vault, tag_ids: &[i64]) -> Result<Vec<Account>> {

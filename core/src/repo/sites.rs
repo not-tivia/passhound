@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::repo::common;
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
 use rusqlite::params;
@@ -53,10 +54,7 @@ pub fn get(vault: &Vault, id: i64) -> Result<Site> {
         "SELECT id, name, url, category, abbreviations, notes, created_at FROM sites WHERE id = ?1",
         params![id],
         row_to_site,
-    ).map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => Error::NotFound,
-        other => Error::from(other),
-    })
+    ).map_err(common::not_found_or_db)
 }
 
 pub fn find_by_name(vault: &Vault, name: &str) -> Result<Option<Site>> {
