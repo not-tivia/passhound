@@ -2,6 +2,7 @@
 //! -> score modifiers -> constraints -> sort -> truncate.
 
 use crate::error::{Error, Result};
+use crate::recovery::feedback;
 use crate::recovery::generators::GENERATORS;
 use crate::recovery::pool;
 use crate::recovery::score::{ranking, SCORE_MODIFIERS};
@@ -72,7 +73,7 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
                 // O(N log N) times (~3M calls per recover() invocation; perf budget
                 // breached). Caching cuts that to N calls per firing.
                 for c in fan.iter_mut() {
-                    c.score = ranking::score(c, &ctx);
+                    c.score = ranking::score(c, &ctx, None);
                 }
                 let by_score = |a: &Candidate, b: &Candidate| {
                     b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
@@ -98,9 +99,13 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
         }
     }
 
-    // Score.
+    // Score, with Phase 4.12 feedback-derived per-rule multipliers applied
+    // ONLY at the final ranking step (not during intermediate cap-truncation
+    // above — keeping that pass unmodified preserves the prior ranking and
+    // performance characteristics of internal pruning).
+    let multipliers = feedback::compute_multipliers(vault)?;
     for c in &mut fan {
-        c.score = ranking::score(c, &ctx);
+        c.score = ranking::score(c, &ctx, Some(&multipliers));
     }
     for m in SCORE_MODIFIERS {
         for c in &mut fan {

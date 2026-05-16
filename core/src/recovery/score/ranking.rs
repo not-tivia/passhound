@@ -6,8 +6,13 @@ use crate::recovery::score::{
 };
 use crate::recovery::stats::{count_trailing_digits, trailing_year};
 use crate::recovery::{Candidate, RecoverContext, RuleId};
+use std::collections::HashMap;
 
-pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
+pub fn score(
+    c: &Candidate,
+    ctx: &RecoverContext<'_>,
+    multipliers: Option<&HashMap<RuleId, f32>>,
+) -> f32 {
     // Site signal: prefer the seed-derived site_match_strength when the candidate
     // descends from a real history seed. For generated candidates (BaseWordPool /
     // WordCombine, no seed_history_id) fall back to a post-hoc check: when the
@@ -61,7 +66,18 @@ pub fn score(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
     if diversity > 0 {
         total += W_CLEAN_PATTERN * (diversity as f32) / 4.0;
     }
-    total
+
+    let rule_multiplier = match multipliers {
+        None => 1.0,
+        Some(_) if c.provenance.is_empty() => 1.0,
+        Some(m) => {
+            let sum: f32 = c.provenance.iter()
+                .map(|r| m.get(r).copied().unwrap_or(1.0))
+                .sum();
+            sum / c.provenance.len() as f32
+        }
+    };
+    total * rule_multiplier
 }
 
 fn pattern_freq_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
@@ -141,7 +157,7 @@ mod tests {
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None };
-        let v = score(&cand, &rc);
+        let v = score(&cand, &rc, None);
         assert!((0.0..=1.0).contains(&v));
     }
 
@@ -154,7 +170,7 @@ mod tests {
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let with_hint = Candidate { password: Zeroizing::new("Fluffy".into()), score: 0.0, provenance: vec![], seed_history_id: None };
         let no_hint = Candidate { password: Zeroizing::new("Other".into()), score: 0.0, provenance: vec![], seed_history_id: None };
-        assert!(score(&with_hint, &rc) > score(&no_hint, &rc));
+        assert!(score(&with_hint, &rc, None) > score(&no_hint, &rc, None));
     }
 
     #[test]
@@ -173,7 +189,7 @@ mod tests {
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let strong = Candidate { password: Zeroizing::new("X".into()), score: 0.0, provenance: vec![], seed_history_id: Some(1) };
         let weak = Candidate { password: Zeroizing::new("Y".into()), score: 0.0, provenance: vec![], seed_history_id: Some(2) };
-        assert!(score(&strong, &rc) > score(&weak, &rc));
+        assert!(score(&strong, &rc, None) > score(&weak, &rc, None));
     }
 
     #[test]
@@ -185,7 +201,7 @@ mod tests {
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let with = Candidate { password: Zeroizing::new("abc!".into()), score: 0.0, provenance: vec![], seed_history_id: None };
         let without = Candidate { password: Zeroizing::new("abcz".into()), score: 0.0, provenance: vec![], seed_history_id: None };
-        assert!(score(&with, &rc) > score(&without, &rc));
+        assert!(score(&with, &rc, None) > score(&without, &rc, None));
     }
 
     #[test]
@@ -207,7 +223,7 @@ mod tests {
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let with = Candidate { password: Zeroizing::new("Fluffy123".into()), score: 0.0, provenance: vec![], seed_history_id: None };
         let without = Candidate { password: Zeroizing::new("Banana123".into()), score: 0.0, provenance: vec![], seed_history_id: None };
-        assert!(score(&with, &rc) > score(&without, &rc));
+        assert!(score(&with, &rc, None) > score(&without, &rc, None));
     }
 
     #[test]
@@ -235,7 +251,7 @@ mod tests {
             provenance: vec![],
             seed_history_id: None,
         };
-        assert!(score(&with_abbr, &rc) > score(&without, &rc),
+        assert!(score(&with_abbr, &rc, None) > score(&without, &rc, None),
             "containing site abbrev should bump score when --site is set");
     }
 
@@ -257,7 +273,7 @@ mod tests {
             provenance: vec![RuleId::WordCombine],
             seed_history_id: None,
         };
-        assert!(score(&with_oc, &rc) > score(&without_oc, &rc),
+        assert!(score(&with_oc, &rc, None) > score(&without_oc, &rc, None),
             "OriginalCasing in provenance must boost score");
     }
 
@@ -303,11 +319,51 @@ mod tests {
             provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
             seed_history_id: None,
         };
-        let s_clean = score(&clean, &rc);
-        let s_dirty = score(&dirty, &rc);
+        let s_clean = score(&clean, &rc, None);
+        let s_dirty = score(&dirty, &rc, None);
         assert!(
             s_clean > s_dirty,
             "clean pattern must outrank dirty trailing-symbol child; got clean={s_clean} dirty={s_dirty}"
+        );
+    }
+
+    #[test]
+    fn score_with_multiplier_applies_average() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("v.db");
+        let v = crate::vault::Vault::create(&path, b"hunter2").unwrap();
+        let config = RecoverConfig { limit: 100, ..Default::default() };
+        let pool = Pool {
+            seeds: vec![],
+            favorite_base_words: vec![],
+            all_base_words: vec![],
+            site_abbreviations: vec![],
+            era_window: None,
+        };
+        let stats = HistoryStats::default();
+        let ctx = RecoverContext { vault: &v, config: &config, pool: &pool, stats: &stats };
+        let c = Candidate {
+            password: Zeroizing::new("MoonBeam$2019".into()),
+            score: 0.0,
+            provenance: vec![RuleId::BaseWordPool, RuleId::SiteAffix],
+            seed_history_id: None,
+        };
+
+        let base = score(&c, &ctx, None);
+
+        let mut m: HashMap<RuleId, f32> = HashMap::new();
+        m.insert(RuleId::BaseWordPool, 1.2);
+        m.insert(RuleId::SiteAffix, 1.0);
+        let with_mult = score(&c, &ctx, Some(&m));
+
+        // Average is (1.2 + 1.0) / 2 = 1.1.
+        let expected = base * 1.1;
+        let tolerance = 1e-4_f32;
+        assert!(
+            (with_mult - expected).abs() < tolerance,
+            "expected {} (= base {} * 1.1), got {}",
+            expected, base, with_mult
         );
     }
 }
