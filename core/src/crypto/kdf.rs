@@ -1,8 +1,19 @@
 use crate::error::{Error, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
+use zeroize::Zeroizing;
 
 /// Argon2id parameters: 64 MiB memory, 3 iterations, 1 lane. ~250ms on modern desktop.
+///
+/// OWASP 2025 cheatsheet tiers (https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html):
+///   minimum:        19 MiB / 2 iter / 1 lane
+///   standard:       46 MiB / 1 iter / 1 lane
+///   high-security: 128 MiB / 3 iter / 4 lanes
+///
+/// PassHound sits between standard and high-security — explicitly conservative for a desktop
+/// tool with no UX sensitivity to ~250ms unlocks. Per the 2026-05-17 security audit
+/// (docs/superpowers/audits/2026-05-17-passhound-security-audit.md), these params are stronger
+/// than current published guidance. DO NOT REDUCE WITHOUT EXPLICIT SECURITY REVIEW.
 fn params() -> Params {
     Params::new(64 * 1024, 3, 1, Some(32)).expect("valid argon2 params")
 }
@@ -11,16 +22,20 @@ fn params() -> Params {
 ///
 /// Uses Argon2id with parameters chosen to take ~250ms on a modern desktop.
 /// Salt MUST be at least 16 bytes and unique per vault.
+///
+/// The intermediate output buffer is wrapped in `Zeroizing` so it zeros on drop;
+/// the returned `[u8; 32]` is a copy that the caller (typically `MasterKey::new`)
+/// is responsible for zeroizing.
 pub fn derive_key(password: &[u8], salt: &[u8]) -> Result<[u8; 32]> {
     if salt.len() < 16 {
         return Err(Error::InvalidInput("salt must be at least 16 bytes".into()));
     }
-    let mut out = [0u8; 32];
+    let mut out = Zeroizing::new([0u8; 32]);
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params());
     argon
-        .hash_password_into(password, salt, &mut out)
+        .hash_password_into(password, salt, out.as_mut_slice())
         .map_err(|e| Error::Argon2(e.to_string()))?;
-    Ok(out)
+    Ok(*out)
 }
 
 /// Generate a fresh random 16-byte salt for a new vault.
