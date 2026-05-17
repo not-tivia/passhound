@@ -6,6 +6,7 @@
 //! transactional batch tagged with a fresh `imports` row id.
 
 use chrono::{DateTime, Utc};
+use zeroize::Zeroizing;
 
 pub mod csv;
 pub mod paste;
@@ -26,8 +27,9 @@ pub struct ImportEntry {
     /// Public-facing identity on the service (game handle, screen name).
     /// Distinct from `username` (login credential). Optional.
     pub display_name: Option<String>,
-    /// Required, never empty.
-    pub password: String,
+    /// Required, never empty. Wrapped in `Zeroizing` so the plaintext is
+    /// wiped from memory when this entry is dropped.
+    pub password: Zeroizing<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub notes: Option<String>,
     /// Verbatim source line(s) for `--show-conflicts` diagnostics.
@@ -58,5 +60,14 @@ mod tests {
         let r = ParseResult::default();
         assert!(r.entries.is_empty());
         assert!(r.diagnostics.is_empty());
+    }
+
+    /// Compile-time type check: ImportEntry.password must be Zeroizing<String>.
+    /// If the field type regresses to plain String this function will not compile.
+    #[test]
+    fn import_entry_password_is_zeroizing() {
+        fn _check(e: &ImportEntry) -> &zeroize::Zeroizing<String> {
+            &e.password
+        }
     }
 }

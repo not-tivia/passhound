@@ -6,6 +6,7 @@
 //! `password:`, becomes a `ParseDiagnostic`.
 
 use super::{ImportEntry, ParseDiagnostic, ParseResult};
+use zeroize::Zeroizing;
 
 /// Parse the input string into entries and diagnostics.
 pub fn parse_str(input: &str) -> ParseResult {
@@ -36,7 +37,25 @@ pub fn parse_str(input: &str) -> ParseResult {
 }
 
 fn process_block(lines: &[&str], start_row: usize, result: &mut ParseResult) {
-    let raw = lines.join("\n");
+    // Build a redacted version of raw: any line whose key prefix is
+    // `password:` or `pass:` has its value replaced with `<redacted>`.
+    // This is used for both `ParseDiagnostic.raw` and `ImportEntry.source_row`
+    // so the plaintext password is never stored in diagnostics or logs.
+    let raw: String = lines
+        .iter()
+        .map(|line| {
+            if strip_prefix_ci(line, "password:").is_some()
+                || strip_prefix_ci(line, "pass:").is_some()
+            {
+                // Preserve the prefix, replace value with <redacted>.
+                let colon_pos = line.find(':').expect("prefix matched means colon exists");
+                format!("{}: <redacted>", &line[..colon_pos])
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut site: Option<String> = None;
     let mut url: Option<String> = None;
     let mut username: Option<String> = None;
@@ -142,7 +161,7 @@ fn process_block(lines: &[&str], start_row: usize, result: &mut ParseResult) {
         }
     };
     let final_password = match password {
-        Some(p) if !p.is_empty() => p,
+        Some(p) if !p.is_empty() => Zeroizing::new(p),
         _ => {
             result.diagnostics.push(ParseDiagnostic {
                 row: start_row,
@@ -212,7 +231,7 @@ password: Bezos$Buy1
         assert_eq!(r.entries.len(), 2);
         assert_eq!(r.diagnostics.len(), 0);
         assert_eq!(r.entries[0].site, "RuneScape");
-        assert_eq!(r.entries[0].password, "Fluffy!2014");
+        assert_eq!(r.entries[0].password.as_str(), "Fluffy!2014");
         assert_eq!(r.entries[1].site, "Amazon");
     }
 
@@ -227,7 +246,7 @@ PASSWORD: baz
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.entries[0].site, "Foo");
         assert_eq!(r.entries[0].username.as_deref(), Some("bar"));
-        assert_eq!(r.entries[0].password, "baz");
+        assert_eq!(r.entries[0].password.as_str(), "baz");
     }
 
     #[test]
@@ -263,7 +282,7 @@ password:   Fluffy!2014
         let r = parse_str(input);
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.entries[0].site, "RuneScape");
-        assert_eq!(r.entries[0].password, "Fluffy!2014");
+        assert_eq!(r.entries[0].password.as_str(), "Fluffy!2014");
     }
 
     #[test]

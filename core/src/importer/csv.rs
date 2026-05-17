@@ -9,6 +9,7 @@
 use super::{ImportEntry, ParseDiagnostic, ParseResult};
 use crate::error::{Error, Result};
 use crate::vault::Vault;
+use zeroize::Zeroizing;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -232,7 +233,10 @@ pub fn parse_file(
                 continue;
             }
         };
-        let raw = rec.iter().collect::<Vec<_>>().join(",");
+        let raw = rec.iter().enumerate()
+            .map(|(i, field)| if i == map.password { "<redacted>" } else { field })
+            .collect::<Vec<_>>()
+            .join(",");
 
         let site = if let Some(name) = &site_override {
             name.clone()
@@ -253,7 +257,7 @@ pub fn parse_file(
             }
         };
         let password = match rec.get(map.password).map(|s| s.trim()) {
-            Some(s) if !s.is_empty() => s.to_string(),
+            Some(s) if !s.is_empty() => Zeroizing::new(s.to_string()),
             _ => {
                 result.diagnostics.push(ParseDiagnostic {
                     row: row_num,
@@ -351,7 +355,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 2);
         assert_eq!(r.entries[0].site, "RuneScape");
-        assert_eq!(r.entries[0].password, "Fluffy!2014");
+        assert_eq!(r.entries[0].password.as_str(), "Fluffy!2014");
         assert_eq!(r.entries[1].notes, None);
     }
 
@@ -393,7 +397,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         assert_eq!(r.entries.len(), 2);
         assert_eq!(r.entries[0].site, "RuneScape");
         assert_eq!(r.entries[0].username.as_deref(), Some("chris"));
-        assert_eq!(r.entries[0].password, "Fluffy!2014");
+        assert_eq!(r.entries[0].password.as_str(), "Fluffy!2014");
         assert_eq!(r.entries[1].site, "RuneScape");
     }
 
@@ -487,7 +491,7 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.entries[0].site, "FooSite");
-        assert_eq!(r.entries[0].password, "FooPass");
+        assert_eq!(r.entries[0].password.as_str(), "FooPass");
     }
 
     #[test]
@@ -577,5 +581,39 @@ Amazon,amazon.com,chris@example.com,Bezos$1,\n";
         let r = parse_file(&v, f.path(), None, None).unwrap();
         assert_eq!(r.entries.len(), 1);
         assert_eq!(r.entries[0].display_name.as_deref(), Some("MaxedNoob"));
+    }
+
+    /// Verify that ParseDiagnostic.raw never leaks the password plaintext.
+    ///
+    /// We craft a CSV where the first row has an empty site (triggers a
+    /// "missing site" diagnostic) but a real password value (`S3cr3tPw!`).
+    /// The resulting diagnostic's `raw` must contain the literal string
+    /// `<redacted>` in the password column position and must NOT contain the
+    /// original password text.
+    #[test]
+    fn parse_diagnostic_raw_redacts_password_column() {
+        let (_t, v) = vault();
+        // name(col 0), password(col 1) — site_override is None so the name
+        // column is used. An empty site triggers the "missing site" diagnostic
+        // and we can inspect its `raw` field.
+        let secret = "S3cr3tPw!";
+        let content = format!("name,password\n,{secret}\nFoo,OtherPw\n");
+        let f = write_csv(&content);
+        let r = parse_file(&v, f.path(), None, None).unwrap();
+
+        // The empty-site row should produce exactly one diagnostic.
+        assert_eq!(r.diagnostics.len(), 1, "expected one missing-site diagnostic");
+        let raw = &r.diagnostics[0].raw;
+
+        // Password plaintext must NOT appear in the raw diagnostic field.
+        assert!(
+            !raw.contains(secret),
+            "diagnostic raw must not contain password plaintext; got: {raw:?}"
+        );
+        // The redacted sentinel must appear instead.
+        assert!(
+            raw.contains("<redacted>"),
+            "diagnostic raw must contain '<redacted>'; got: {raw:?}"
+        );
     }
 }

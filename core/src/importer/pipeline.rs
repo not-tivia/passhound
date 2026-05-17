@@ -67,7 +67,7 @@ pub fn preview(vault: &Vault, entries: Vec<ImportEntry>) -> Result<Preview> {
                         let current = passwords::current_plaintext(vault, acc.id)?;
                         match current {
                             None => (Classification::New, Some(site.id), Some(acc.id)),
-                            Some(pt) if pt.as_str() == entry.password => {
+                            Some(pt) if pt.as_str() == entry.password.as_str() => {
                                 (Classification::DuplicateOfTriple, Some(site.id), Some(acc.id))
                             }
                             Some(_) => {
@@ -321,7 +321,7 @@ mod tests {
             url: None,
             username: user.map(|u| u.to_string()),
             display_name: None,
-            password: pw.into(),
+            password: zeroize::Zeroizing::new(pw.to_string()),
             created_at: None,
             notes: None,
             source_row: None,
