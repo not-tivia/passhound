@@ -14,10 +14,16 @@ use zeroize::Zeroizing;
 /// Implements `Hash` and `Eq` so it can be used directly as a `HashMap` key,
 /// and `Borrow<str>` so lookups with a plain `&str` avoid an extra allocation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, zeroize::ZeroizeOnDrop)]
-pub struct CanonicalKey(String);
+pub struct CanonicalKey(pub(crate) String);
 
 impl std::borrow::Borrow<str> for CanonicalKey {
     fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for CanonicalKey {
+    fn as_ref(&self) -> &str {
         &self.0
     }
 }
@@ -74,7 +80,7 @@ pub fn extract_base_words_from_history(vault: &Vault, top_favorites: usize) -> R
     let tx = vault.conn().unchecked_transaction()?;
     let mut written = 0usize;
     for (word, ag) in &agg {
-        let word_str: &str = std::borrow::Borrow::borrow(word);
+        let word_str: &str = word.as_ref();
         if let Some(&id) = existing_by_word.get(word_str) {
             tx.execute(
                 "UPDATE base_words SET usage_count = ?1, last_seen_at = ?2 WHERE id = ?3",
@@ -211,7 +217,7 @@ mod tests {
     #[test]
     fn tokenize_basics() {
         let canonicals = |s: &str| -> Vec<String> {
-            tokenize(s).into_iter().map(|t| t.canonical.0.clone()).collect()
+            tokenize(s).into_iter().map(|t| t.canonical.as_ref().to_owned()).collect()
         };
         assert_eq!(canonicals("Fluffy!2014"), vec!["fluffy"]);
         assert_eq!(canonicals("MoonBeam$2018"), vec!["moon", "beam"]);
@@ -222,7 +228,7 @@ mod tests {
 
     #[test]
     fn tokenize_drops_pure_digits_and_short_tokens() {
-        let canonicals: Vec<String> = tokenize("a 12345 abcd").into_iter().map(|t| t.canonical.0.clone()).collect();
+        let canonicals: Vec<String> = tokenize("a 12345 abcd").into_iter().map(|t| t.canonical.as_ref().to_owned()).collect();
         assert_eq!(canonicals, vec!["abcd"]);
     }
 
@@ -230,9 +236,9 @@ mod tests {
     fn tokenize_captures_casing_mask() {
         let toks = tokenize("MoonBeam$2018");
         assert_eq!(toks.len(), 2);
-        assert_eq!(toks[0].canonical.0.as_str(), "moon");
+        assert_eq!(toks[0].canonical.as_ref(), "moon");
         assert_eq!(toks[0].casing_mask, 0b0001, "first char of 'Moon' is upper");
-        assert_eq!(toks[1].canonical.0.as_str(), "beam");
+        assert_eq!(toks[1].canonical.as_ref(), "beam");
         assert_eq!(toks[1].casing_mask, 0b0001, "first char of 'Beam' is upper");
     }
 
@@ -240,7 +246,7 @@ mod tests {
     fn tokenize_lowercase_input_yields_zero_mask() {
         let toks = tokenize("fluffy!2014");
         assert_eq!(toks.len(), 1);
-        assert_eq!(toks[0].canonical.0.as_str(), "fluffy");
+        assert_eq!(toks[0].canonical.as_ref(), "fluffy");
         assert_eq!(toks[0].casing_mask, 0);
     }
 
@@ -248,7 +254,7 @@ mod tests {
     fn tokenize_uppercase_input_yields_full_mask() {
         let toks = tokenize("FLUFFY!2014");
         assert_eq!(toks.len(), 1);
-        assert_eq!(toks[0].canonical.0.as_str(), "fluffy");
+        assert_eq!(toks[0].canonical.as_ref(), "fluffy");
         assert_eq!(toks[0].casing_mask, 0b00111111);
     }
 
