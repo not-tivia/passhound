@@ -31,6 +31,7 @@ export default function AddBaseWordModal({ onClose, onAdded, onLockedError }: Ad
     } catch (e) {
       const err = e as GuiError;
       if (err.kind === "Locked") onLockedError();
+      else if (err.kind === "AlreadyExists") setError("That word is already in your list.");
       else setError(err.message ?? err.kind);
     } finally {
       setBusy(false);
@@ -54,7 +55,7 @@ export default function AddBaseWordModal({ onClose, onAdded, onLockedError }: Ad
         {error && <div className="modal__error">{error}</div>}
         <div className="modal__actions">
           <button onClick={onClose} disabled={busy}>Cancel</button>
-          <button onClick={handleAdd} disabled={busy}>{busy ? "Adding…" : "Add"}</button>
+          <button onClick={() => void handleAdd()} disabled={busy}>{busy ? "Adding…" : "Add"}</button>
         </div>
       </div>
     </div>
