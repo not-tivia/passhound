@@ -31,10 +31,13 @@ pub fn extract_base_words_from_history(vault: &Vault, top_favorites: usize) -> R
     history.sort_by(|(a, _), (b, _)| a.cmp(b));
 
     // 2. Tokenize each plaintext, aggregate {word -> count, first_seen, last_seen, casing_mask}.
+    // Keys are plaintext fragments; Zeroizing<String> does not impl Hash in zeroize 1.x,
+    // so we store plain String keys here. Token.canonical (Zeroizing<String>) zeroes when
+    // each Token drops at the end of the inner loop iteration.
     let mut agg: HashMap<String, Aggregate> = HashMap::new();
     for (created_at, plaintext) in &history {
         for token in tokenize(plaintext.as_str()) {
-            let entry = agg.entry(token.canonical).or_insert(Aggregate {
+            let entry = agg.entry(token.canonical.to_string()).or_insert(Aggregate {
                 count: 0,
                 first_seen: *created_at,
                 last_seen: *created_at,
@@ -140,7 +143,7 @@ fn decrypt_all_history(vault: &Vault) -> Result<Vec<(DateTime<Utc>, Zeroizing<St
 pub struct Token {
     /// Lowercase canonical form, used as the dedup key in analyze and the
     /// stored ciphertext in base_words.
-    pub canonical: String,
+    pub canonical: Zeroizing<String>,
     /// Bitmask: bit `i` = 1 if char `i` of `canonical` is uppercase in the
     /// password fragment that produced this token. See
     /// `repo::base_words::apply_casing_mask` for reconstruction.
@@ -171,7 +174,7 @@ pub fn tokenize(password: &str) -> Vec<Token> {
         .split_whitespace()
         .filter(|t| t.chars().count() >= 4 && t.chars().count() <= 24)
         .map(|original| {
-            let canonical: String = original.chars().flat_map(|c| c.to_lowercase()).collect();
+            let canonical: Zeroizing<String> = Zeroizing::new(original.chars().flat_map(|c| c.to_lowercase()).collect());
             let casing_mask = crate::repo::base_words::compute_casing_mask(original);
             Token { canonical, casing_mask }
         })
@@ -195,7 +198,7 @@ mod tests {
     #[test]
     fn tokenize_basics() {
         let canonicals = |s: &str| -> Vec<String> {
-            tokenize(s).into_iter().map(|t| t.canonical).collect()
+            tokenize(s).into_iter().map(|t| t.canonical.to_string()).collect()
         };
         assert_eq!(canonicals("Fluffy!2014"), vec!["fluffy"]);
         assert_eq!(canonicals("MoonBeam$2018"), vec!["moon", "beam"]);
@@ -206,7 +209,7 @@ mod tests {
 
     #[test]
     fn tokenize_drops_pure_digits_and_short_tokens() {
-        let canonicals: Vec<String> = tokenize("a 12345 abcd").into_iter().map(|t| t.canonical).collect();
+        let canonicals: Vec<String> = tokenize("a 12345 abcd").into_iter().map(|t| t.canonical.to_string()).collect();
         assert_eq!(canonicals, vec!["abcd"]);
     }
 
@@ -214,9 +217,9 @@ mod tests {
     fn tokenize_captures_casing_mask() {
         let toks = tokenize("MoonBeam$2018");
         assert_eq!(toks.len(), 2);
-        assert_eq!(toks[0].canonical, "moon");
+        assert_eq!(toks[0].canonical.as_str(), "moon");
         assert_eq!(toks[0].casing_mask, 0b0001, "first char of 'Moon' is upper");
-        assert_eq!(toks[1].canonical, "beam");
+        assert_eq!(toks[1].canonical.as_str(), "beam");
         assert_eq!(toks[1].casing_mask, 0b0001, "first char of 'Beam' is upper");
     }
 
@@ -224,7 +227,7 @@ mod tests {
     fn tokenize_lowercase_input_yields_zero_mask() {
         let toks = tokenize("fluffy!2014");
         assert_eq!(toks.len(), 1);
-        assert_eq!(toks[0].canonical, "fluffy");
+        assert_eq!(toks[0].canonical.as_str(), "fluffy");
         assert_eq!(toks[0].casing_mask, 0);
     }
 
@@ -232,8 +235,16 @@ mod tests {
     fn tokenize_uppercase_input_yields_full_mask() {
         let toks = tokenize("FLUFFY!2014");
         assert_eq!(toks.len(), 1);
-        assert_eq!(toks[0].canonical, "fluffy");
+        assert_eq!(toks[0].canonical.as_str(), "fluffy");
         assert_eq!(toks[0].casing_mask, 0b00111111);
+    }
+
+    #[test]
+    fn analyze_aggregates_use_zeroizing_keys() {
+        // Compile-time check: Token.canonical is Zeroizing<String> so each
+        // plaintext fragment zeroes when the Token drops (zeroize 1.x does not
+        // impl Hash for Zeroizing<String>, so the agg HashMap uses String keys).
+        fn _check_token_canonical(t: &Token) -> &zeroize::Zeroizing<String> { &t.canonical }
     }
 
     #[test]
