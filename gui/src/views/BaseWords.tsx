@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import BaseWordsHeader from "../components/BaseWordsHeader";
 import FavoritesPane from "../components/FavoritesPane";
 import AllPane from "../components/AllPane";
+import AddBaseWordModal from "../components/AddBaseWordModal";
 import { useToast } from "../components/Toast";
 import { useSettings } from "../context/SettingsContext";
 import { api } from "../api";
+import { getBaseWordsSortMode, setBaseWordsSortMode } from "../preferences";
+import type { BaseWordsSortMode } from "../preferences";
 import type { BaseWordView, GuiError } from "../types";
 
 interface BaseWordsProps {
@@ -20,6 +23,10 @@ export default function BaseWords({ onLockedError }: BaseWordsProps) {
   // settings.default_reveal do not override the user's in-view toggle.
   const [revealAll, setRevealAll] = useState(settings.default_reveal);
   const [analyzing, setAnalyzing] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [sortMode, setSortMode] = useState<BaseWordsSortMode>(
+    () => getBaseWordsSortMode()
+  );
 
   const fetchWords = async () => {
     try {
@@ -36,6 +43,27 @@ export default function BaseWords({ onLockedError }: BaseWordsProps) {
     fetchWords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setBaseWordsSortMode(sortMode);
+  }, [sortMode]);
+
+  const sortedWords = useMemo(() => {
+    const arr = [...words];
+    if (sortMode === "alpha") {
+      arr.sort((a, b) => a.word.toLowerCase().localeCompare(b.word.toLowerCase()));
+    } else if (sortMode === "last_seen") {
+      arr.sort((a, b) => {
+        const at = a.last_seen_at ?? "";
+        const bt = b.last_seen_at ?? "";
+        return bt.localeCompare(at);
+      });
+    } else {
+      // usage desc
+      arr.sort((a, b) => b.usage_count - a.usage_count);
+    }
+    return arr;
+  }, [words, sortMode]);
 
   const handlePromote = async (id: number) => {
     try {
@@ -90,21 +118,31 @@ export default function BaseWords({ onLockedError }: BaseWordsProps) {
         analyzing={analyzing}
         onToggleReveal={() => setRevealAll((v) => !v)}
         onReanalyze={handleReanalyze}
+        onAddClick={() => setAddOpen(true)}
+        sortMode={sortMode}
+        onSortChange={setSortMode}
       />
       <div className="base-words-panes">
         <FavoritesPane
-          words={words}
+          words={sortedWords}
           revealAll={revealAll}
           onDemote={handleDemote}
         />
         <AllPane
-          words={words}
+          words={sortedWords}
           revealAll={revealAll}
           search={search}
           onSearchChange={setSearch}
           onPromote={handlePromote}
         />
       </div>
+      {addOpen && (
+        <AddBaseWordModal
+          onClose={() => setAddOpen(false)}
+          onAdded={() => void fetchWords()}
+          onLockedError={onLockedError}
+        />
+      )}
     </div>
   );
 }

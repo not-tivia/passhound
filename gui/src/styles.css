@@ -1942,3 +1942,16 @@ select option {
 .pwd-cell__edit-input:disabled {
   opacity: 0.5;
 }
+
+/* Phase 4.14 — base-words header additions */
+.base-words__sort-select {
+  font-size: 11px;
+  background: var(--surface-1, #1a1a20);
+  color: var(--text-0, #d0d0d8);
+  border: 1px solid var(--border, #2a2a30);
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.modal--add-base-word {
+  min-width: 320px;
+}

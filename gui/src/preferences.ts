@@ -7,20 +7,29 @@ const STORAGE_KEY = "passhound.preferences.v1";
 
 export type PrimaryIdentity = "username" | "display_name";
 export type ColumnId = "site" | "user_display" | "last";
+export type BaseWordsSortMode = "usage" | "alpha" | "last_seen";
 
 interface Preferences {
   schema_version: number;
   vault_list_primary: PrimaryIdentity;
   vault_list_column_order: ColumnId[];
+  baseWordsSortMode: BaseWordsSortMode;
 }
 
 const DEFAULT: Preferences = {
   schema_version: SCHEMA_VERSION,
   vault_list_primary: "username",
   vault_list_column_order: ["site", "user_display", "last"],
+  baseWordsSortMode: "usage",
 };
 
 const ALL_COLUMN_IDS: ColumnId[] = ["site", "user_display", "last"];
+
+function sanitizeBaseWordsSortMode(input: unknown): BaseWordsSortMode {
+  return input === "usage" || input === "alpha" || input === "last_seen"
+    ? (input as BaseWordsSortMode)
+    : "usage";
+}
 
 function load(): Preferences {
   try {
@@ -32,6 +41,7 @@ function load(): Preferences {
       vault_list_primary:
         parsed.vault_list_primary === "display_name" ? "display_name" : "username",
       vault_list_column_order: sanitizeColumnOrder(parsed.vault_list_column_order),
+      baseWordsSortMode: sanitizeBaseWordsSortMode(parsed.baseWordsSortMode),
     };
   } catch {
     return DEFAULT;
@@ -80,5 +90,15 @@ export function getVaultListColumnOrder(): ColumnId[] {
 export function setVaultListColumnOrder(order: ColumnId[]): void {
   const prefs = load();
   prefs.vault_list_column_order = sanitizeColumnOrder(order);
+  save(prefs);
+}
+
+export function getBaseWordsSortMode(): BaseWordsSortMode {
+  return load().baseWordsSortMode;
+}
+
+export function setBaseWordsSortMode(mode: BaseWordsSortMode): void {
+  const prefs = load();
+  prefs.baseWordsSortMode = sanitizeBaseWordsSortMode(mode);
   save(prefs);
 }
