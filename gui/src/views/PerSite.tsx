@@ -161,6 +161,9 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
             .filter((x): x is string => !!x)
             .join(" · ")}
         </div>
+        {detail.site_notes && detail.site_notes.trim() && (
+          <div className="per-site__site-notes">{detail.site_notes}</div>
+        )}
         <div className="per-site__user">
           {detail.username ?? "(no username)"}
         </div>

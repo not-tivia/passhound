@@ -375,6 +375,14 @@ select option {
   margin-top: 3px;
 }
 
+.per-site__site-notes {
+  color: var(--text-2);
+  font-size: 11px;
+  font-style: italic;
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
 .per-site__user {
   color: var(--text-2);
   font-size: 11px;
