@@ -1,9 +1,8 @@
 {
   "identifier": "default",
-  "description": "Default capability for the main window: core permissions + clipboard write + dialog open/save.",
+  "description": "Default capability for the main window: clipboard write + dialog open/save. core:default removed — frontend only uses invoke (IPC, no core:* capability needed), not any event/window/path/app API.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
     "clipboard-manager:allow-write-text",
     "dialog:allow-open",
     "dialog:allow-save"
