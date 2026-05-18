@@ -1209,11 +1209,14 @@ pub struct RuleTag {
     pub name: String,
 }
 
+/// Metadata for a single recovery candidate. The plaintext lives in
+/// `VaultState.candidate_cache` and is fetched via `reveal_candidate`
+/// or written to the clipboard via `copy_candidate`. Indexed by
+/// `rank - 1`.
 #[derive(serde::Serialize, Debug, Clone)]
 pub struct CandidateView {
     pub rank: usize,
     pub score: f32,
-    pub password: String,
     pub provenance: Vec<RuleTag>,
 }
 
@@ -1252,13 +1255,20 @@ pub fn recover_candidates_inner(
     };
 
     let candidates = passhound_core::recover(v, cfg)?;
+
+    // Replace the cache atomically with the new candidates' plaintexts.
+    {
+        let mut cache = state.candidate_cache.lock().map_err(poisoned)?;
+        cache.clear();
+        cache.extend(candidates.iter().map(|c| c.password.clone()));
+    }
+
     Ok(candidates
         .into_iter()
         .enumerate()
         .map(|(i, c)| CandidateView {
             rank: i + 1,
             score: c.score,
-            password: c.password.to_string(),
             provenance: c
                 .provenance
                 .iter()
@@ -2324,7 +2334,12 @@ mod tests {
         for (i, c) in result.iter().enumerate() {
             assert_eq!(c.rank, i + 1, "rank should be 1-indexed and sequential");
             assert!(c.score >= 0.0 && c.score <= 1.6, "score in expected range: {}", c.score);
-            assert!(!c.password.is_empty(), "password non-empty");
+        }
+        {
+            let cache = state.candidate_cache.lock().unwrap();
+            for pw in cache.iter() {
+                assert!(!pw.as_str().is_empty(), "cached password non-empty");
+            }
         }
 
         // At least one candidate should carry provenance — verifies that the
@@ -2366,6 +2381,51 @@ mod tests {
             Err(GuiError::EraNotFound(name)) => assert_eq!(name, "nonexistent"),
             other => panic!("expected EraNotFound, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn recover_candidates_populates_cache() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            let s = sites::create(v, sites::NewSite {
+                name: "Reddit".into(),
+                url: Some("reddit.com".into()),
+                category: Some("Social".into()),
+                abbreviations: vec!["Rd".into()],
+                notes: None,
+            }).unwrap();
+            let a = accounts::create(v, accounts::NewAccount {
+                site_id: s.id,
+                username: Some("chris".into()),
+                ..Default::default()
+            }).unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2019Rd", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2020Rd", "manual").unwrap();
+            passwords::set_current(v, a.id, "MoonBeam$2021Rd", "manual").unwrap();
+        }
+
+        let view = recover_candidates_inner(&state, &RecoverFilters {
+            site: None,
+            account: None,
+            era: None,
+            hint: None,
+            limit: 10,
+            min_length: None,
+            require_symbol: false,
+            require_digit: false,
+        }).unwrap();
+
+        assert!(!view.is_empty(), "expected at least one candidate");
+        let cache = state.candidate_cache.lock().unwrap();
+        assert_eq!(
+            cache.len(),
+            view.len(),
+            "cache length must match returned metadata count"
+        );
     }
 
     #[test]
