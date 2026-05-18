@@ -78,7 +78,10 @@ export default function CandidateRow({
     if (busy) return;
     setBusy(true);
     try {
-      const pw = revealedText ?? "";
+      // Char-class learning needs the plaintext. If the user hasn't revealed
+      // this row, fetch it from the cache so the feedback record carries
+      // accurate hasDigit/hasSymbol/hasUpper/hasLower flags.
+      const pw = revealedText ?? (await api.revealCandidate(candidate.rank));
       await api.recordRecoveryFeedback({
         accountId: null,
         provenance: candidate.provenance.map((r) => r.tag),
