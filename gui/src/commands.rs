@@ -134,14 +134,16 @@ pub fn list_accounts(
     state: State<'_, VaultState>,
     filter: Option<String>,
     tag_ids: Option<Vec<i64>>,
+    era_id: Option<i64>,
 ) -> Result<Vec<AccountSummary>, GuiError> {
-    list_accounts_inner(&state, filter.as_deref(), tag_ids)
+    list_accounts_inner(&state, filter.as_deref(), tag_ids, era_id)
 }
 
 pub fn list_accounts_inner(
     state: &VaultState,
     filter: Option<&str>,
     tag_ids: Option<Vec<i64>>,
+    era_id: Option<i64>,
 ) -> Result<Vec<AccountSummary>, GuiError> {
     // TODO(perf): the guard is held across the SQL / decrypt call below —
     // acceptable for the MVP single-user case but a `vault_lock` IPC would
@@ -152,6 +154,26 @@ pub fn list_accounts_inner(
     // `core::Error::Locked → GuiError::Locked` defensively if invariant breaks.
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    // Resolve era filter to a date window. An unknown era id returns
+    // empty list silently (stale frontend filter state shouldn't crash).
+    let era_window: Option<(Option<String>, Option<String>)> = match era_id {
+        None => None,
+        Some(id) => {
+            let row: Option<(Option<String>, Option<String>)> = v
+                .conn()
+                .query_row(
+                    "SELECT start_date, end_date FROM eras WHERE id = ?1",
+                    rusqlite::params![id],
+                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?)),
+                )
+                .ok();
+            match row {
+                None => return Ok(Vec::new()), // unknown era → empty list silently
+                Some((None, None)) => None,    // era has no dates → no filter
+                Some(window) => Some(window),
+            }
+        }
+    };
     // Joined query: accounts × sites + max(password_history.created_at) for the
     // most-recent password (current or retired). Ordered by last_changed desc
     // with NULLs (accounts with no password history) last.
@@ -238,6 +260,24 @@ pub fn list_accounts_inner(
             last_changed,
             category,
             tags: Vec::new(),
+        });
+    }
+    // Era filter post-pass. An era with both dates NULL is a no-op
+    // (we returned None at resolve time). Each retained account has
+    // at least one password_history row in the (start, end) window.
+    if let Some((era_start, era_end)) = era_window {
+        let mut filter_stmt = v.conn().prepare(
+            "SELECT 1 FROM password_history
+             WHERE account_id = ?1
+               AND retired_at IS NULL
+               AND (?2 IS NULL OR created_at >= ?2)
+               AND (?3 IS NULL OR created_at <= ?3)
+             LIMIT 1",
+        )?;
+        out.retain(|a| {
+            filter_stmt
+                .exists(rusqlite::params![a.id, era_start.as_deref(), era_end.as_deref()])
+                .unwrap_or(false)
         });
     }
     // Merge tags via a single join query over all collected account ids.
@@ -1809,14 +1849,14 @@ mod tests {
         vault_create_inner(&state, &path, b"hunter2").unwrap();
         assert!(vault_exists_inner(&path).unwrap());
         // Empty vault — listing returns no accounts
-        let list = list_accounts_inner(&state, None, None).unwrap();
+        let list = list_accounts_inner(&state, None, None, None).unwrap();
         assert!(list.is_empty());
         // Lock
         vault_lock_inner(&state).unwrap();
-        assert!(matches!(list_accounts_inner(&state, None, None), Err(GuiError::Locked)));
+        assert!(matches!(list_accounts_inner(&state, None, None, None), Err(GuiError::Locked)));
         // Re-unlock
         vault_unlock_inner(&state, &path, b"hunter2").unwrap();
-        let list = list_accounts_inner(&state, None, None).unwrap();
+        let list = list_accounts_inner(&state, None, None, None).unwrap();
         assert!(list.is_empty());
     }
 
@@ -1851,7 +1891,7 @@ mod tests {
                 created_at: None,
             }).unwrap();
         }
-        let list = list_accounts_inner(&state, None, None).unwrap();
+        let list = list_accounts_inner(&state, None, None, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].site_name, "Reddit");
         assert_eq!(list[0].username.as_deref(), Some("chris"));
@@ -1859,10 +1899,79 @@ mod tests {
         assert!(list[0].last_changed.is_some());
         assert_eq!(list[0].display_name.as_deref(), Some("MaxedNoob"));
         // Filter
-        let filtered = list_accounts_inner(&state, Some("redd"), None).unwrap();
+        let filtered = list_accounts_inner(&state, Some("redd"), None, None).unwrap();
         assert_eq!(filtered.len(), 1);
-        let unfiltered = list_accounts_inner(&state, Some("zzz_no_match_zzz"), None).unwrap();
+        let unfiltered = list_accounts_inner(&state, Some("zzz_no_match_zzz"), None, None).unwrap();
         assert_eq!(unfiltered.len(), 0);
+    }
+
+    #[test]
+    fn list_accounts_filters_by_era_overlap() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        let acct_in: i64;
+        let acct_out: i64;
+        let era_id: i64;
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+
+            let s_in = sites::create(v, sites::NewSite {
+                name: "SiteIn".into(),
+                ..Default::default()
+            }).unwrap();
+            let a_in = accounts::create(v, accounts::NewAccount {
+                site_id: s_in.id,
+                ..Default::default()
+            }).unwrap();
+            acct_in = a_in.id;
+
+            let s_out = sites::create(v, sites::NewSite {
+                name: "SiteOut".into(),
+                ..Default::default()
+            }).unwrap();
+            let a_out = accounts::create(v, accounts::NewAccount {
+                site_id: s_out.id,
+                ..Default::default()
+            }).unwrap();
+            acct_out = a_out.id;
+
+            // acct_in: password history row inside the 2010-2015 window.
+            v.conn().execute(
+                "INSERT INTO password_history (account_id, password_encrypted, password_nonce, source, confidence, created_at, retired_at)
+                 VALUES (?1, X'00', X'00', 'manual', 'certain', '2012-06-15T00:00:00Z', NULL)",
+                rusqlite::params![acct_in],
+            ).unwrap();
+            // acct_out: password history row outside the window (2018).
+            v.conn().execute(
+                "INSERT INTO password_history (account_id, password_encrypted, password_nonce, source, confidence, created_at, retired_at)
+                 VALUES (?1, X'00', X'00', 'manual', 'certain', '2018-06-15T00:00:00Z', NULL)",
+                rusqlite::params![acct_out],
+            ).unwrap();
+
+            era_id = eras::add(
+                v,
+                "Window 2010-2015",
+                Some(NaiveDate::from_ymd_opt(2010, 1, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2015, 12, 31).unwrap()),
+                None,
+            ).unwrap();
+        }
+
+        // Without era filter: both accounts visible.
+        let all = list_accounts_inner(&state, None, None, None).unwrap();
+        assert_eq!(all.len(), 2, "no era filter should show both accounts");
+
+        // With era filter: only acct_in.
+        let filtered = list_accounts_inner(&state, None, None, Some(era_id)).unwrap();
+        assert_eq!(filtered.len(), 1, "era filter should match only the 2012 account");
+        assert_eq!(filtered[0].id, acct_in);
+
+        // Unknown era id: empty list silently.
+        let unknown = list_accounts_inner(&state, None, None, Some(9999)).unwrap();
+        assert!(unknown.is_empty(), "unknown era id should return empty list");
     }
 
     #[test]
@@ -2019,7 +2128,7 @@ mod tests {
         assert!(r.import_id > 0);
 
         // Verify the row is in the vault now.
-        let list = list_accounts_inner(&state, None, None).unwrap();
+        let list = list_accounts_inner(&state, None, None, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].site_name, "RuneScape");
     }
@@ -2151,13 +2260,13 @@ mod tests {
         ).unwrap();
 
         // Sanity: account is present before delete.
-        let before = list_accounts_inner(&state, None, None).unwrap();
+        let before = list_accounts_inner(&state, None, None, None).unwrap();
         assert_eq!(before.len(), 1);
 
         delete_account_inner(&state, account_id).unwrap();
 
         // Account is gone.
-        let after = list_accounts_inner(&state, None, None).unwrap();
+        let after = list_accounts_inner(&state, None, None, None).unwrap();
         assert!(after.is_empty(), "expected no accounts after delete; got {} rows", after.len());
 
         // Attachment cascaded away.
@@ -2258,7 +2367,7 @@ mod tests {
         let _a2 = seed_account(&state);
         let tag = create_tag_inner(&state, "foo").unwrap();
         assign_tag_inner(&state, a1, tag.id).unwrap();
-        let filtered = list_accounts_inner(&state, None, Some(vec![tag.id])).unwrap();
+        let filtered = list_accounts_inner(&state, None, Some(vec![tag.id]), None).unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, a1);
     }
@@ -2284,7 +2393,7 @@ mod tests {
         bulk_assign_tag_inner(&state, &ids, tag.id).unwrap();
         let n = bulk_delete_accounts_inner(&state, &ids).unwrap();
         assert_eq!(n, 2);
-        let remaining = list_accounts_inner(&state, None, None).unwrap();
+        let remaining = list_accounts_inner(&state, None, None, None).unwrap();
         assert!(remaining.is_empty());
     }
 
@@ -2780,7 +2889,7 @@ mod tests {
         vault_lock_inner(&state).unwrap();
         vault_unlock_inner(&state, &path, b"new").unwrap();
 
-        let list = list_accounts_inner(&state, None, None).unwrap();
+        let list = list_accounts_inner(&state, None, None, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].site_name, "Reddit");
         assert_eq!(list[0].username.as_deref(), Some("chris"));
