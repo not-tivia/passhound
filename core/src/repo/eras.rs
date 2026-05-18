@@ -43,6 +43,40 @@ pub fn add(
     Ok(vault.conn().last_insert_rowid())
 }
 
+pub fn update(
+    vault: &Vault,
+    id: i64,
+    name: &str,
+    start: Option<NaiveDate>,
+    end: Option<NaiveDate>,
+    notes: Option<&str>,
+) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(Error::InvalidInput("era name required".into()));
+    }
+    let affected = vault.conn().execute(
+        "UPDATE eras SET name = ?1, start_date = ?2, end_date = ?3, notes = ?4 WHERE id = ?5",
+        params![
+            name,
+            start.map(|d| d.format("%Y-%m-%d").to_string()),
+            end.map(|d| d.format("%Y-%m-%d").to_string()),
+            notes,
+            id,
+        ],
+    )?;
+    crate::repo::common::ensure_affected(affected)?;
+    Ok(())
+}
+
+pub fn delete(vault: &Vault, id: i64) -> Result<()> {
+    let affected = vault.conn().execute(
+        "DELETE FROM eras WHERE id = ?1",
+        params![id],
+    )?;
+    crate::repo::common::ensure_affected(affected)?;
+    Ok(())
+}
+
 pub fn find_by_name(vault: &Vault, name: &str) -> Result<Option<Era>> {
     match vault.conn().query_row(
         "SELECT id, name, start_date, end_date, notes FROM eras WHERE name = ?1",
@@ -111,5 +145,63 @@ mod tests {
         add(&v, "College", Some(NaiveDate::from_ymd_opt(2016, 1, 1).unwrap()), None, None).unwrap();
         let names: Vec<String> = list(&v).unwrap().into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["RuneScape years", "College", "Modern"]);
+    }
+
+    #[test]
+    fn update_happy_path() {
+        let (_t, v) = vault();
+        let id = add(
+            &v,
+            "RuneScape years",
+            Some(NaiveDate::from_ymd_opt(2010, 1, 1).unwrap()),
+            Some(NaiveDate::from_ymd_opt(2015, 12, 31).unwrap()),
+            None,
+        ).unwrap();
+        update(
+            &v,
+            id,
+            "OSRS years",
+            Some(NaiveDate::from_ymd_opt(2013, 1, 1).unwrap()),
+            Some(NaiveDate::from_ymd_opt(2017, 12, 31).unwrap()),
+            Some("renamed"),
+        ).unwrap();
+        let e = find_by_name(&v, "OSRS years").unwrap().unwrap();
+        assert_eq!(e.id, id);
+        assert_eq!(e.start_date, Some(NaiveDate::from_ymd_opt(2013, 1, 1).unwrap()));
+        assert_eq!(e.end_date, Some(NaiveDate::from_ymd_opt(2017, 12, 31).unwrap()));
+        assert_eq!(e.notes.as_deref(), Some("renamed"));
+        // Old name no longer present.
+        assert!(find_by_name(&v, "RuneScape years").unwrap().is_none());
+    }
+
+    #[test]
+    fn update_rejects_empty_name() {
+        let (_t, v) = vault();
+        let id = add(&v, "Temp", None, None, None).unwrap();
+        let err = update(&v, id, "   ", None, None, None).unwrap_err();
+        assert!(matches!(err, Error::InvalidInput(_)));
+    }
+
+    #[test]
+    fn update_returns_not_found_for_unknown_id() {
+        let (_t, v) = vault();
+        let err = update(&v, 9999, "Nope", None, None, None).unwrap_err();
+        assert!(matches!(err, Error::NotFound));
+    }
+
+    #[test]
+    fn delete_happy_path() {
+        let (_t, v) = vault();
+        let id = add(&v, "Throwaway", None, None, None).unwrap();
+        assert!(find_by_name(&v, "Throwaway").unwrap().is_some());
+        delete(&v, id).unwrap();
+        assert!(find_by_name(&v, "Throwaway").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_returns_not_found_for_unknown_id() {
+        let (_t, v) = vault();
+        let err = delete(&v, 9999).unwrap_err();
+        assert!(matches!(err, Error::NotFound));
     }
 }
