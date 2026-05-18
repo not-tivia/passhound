@@ -92,6 +92,11 @@ pub fn vault_lock(state: State<'_, VaultState>) -> Result<(), GuiError> {
 pub fn vault_lock_inner(state: &VaultState) -> Result<(), GuiError> {
     let mut guard = state.vault.lock().map_err(poisoned)?;
     *guard = None;
+    // Clear both in-memory caches — they outlive the vault otherwise.
+    let mut candidates = state.candidate_cache.lock().map_err(poisoned)?;
+    candidates.clear();
+    let mut pending = state.pending_import_path.lock().map_err(poisoned)?;
+    *pending = None;
     Ok(())
 }
 
