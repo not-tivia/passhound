@@ -209,4 +209,10 @@ export const api = {
     call<string>("generate_password", { payload }),
   addBaseWord: (text: string) =>
     call<BaseWordView>("add_base_word", { text }),
+
+  // Phase 4.16 — Lazy reveal/copy via IPC
+  revealCandidate: (rank: number) =>
+    call<string>("reveal_candidate", { rank }),
+  copyCandidate: (rank: number) =>
+    call<void>("copy_candidate", { rank }),
 };

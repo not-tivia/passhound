@@ -28,6 +28,7 @@ export default function CandidateRow({
   const [busy, setBusy] = useState(false);
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind>("none");
   const [rowRevealed, setRowRevealed] = useState(revealed);
+  const [revealedText, setRevealedText] = useState<string | null>(null);
 
   // Keep local rowRevealed in sync with the prop (revealAll toggle).
   useEffect(() => {
@@ -45,11 +46,24 @@ export default function CandidateRow({
     return () => clearTimeout(handle);
   }, [rowRevealed, settings.reveal_clear_seconds]);
 
+  // Lazy-fetch plaintext when rowRevealed flips true; clear when false.
+  useEffect(() => {
+    let cancelled = false;
+    if (rowRevealed) {
+      api.revealCandidate(candidate.rank)
+        .then((pt) => { if (!cancelled) setRevealedText(pt); })
+        .catch(() => { if (!cancelled) setRevealedText(null); });
+    } else {
+      setRevealedText(null);
+    }
+    return () => { cancelled = true; };
+  }, [rowRevealed, candidate.rank]);
+
   const handleCopy = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      await api.copyToClipboardWithAutoClear(candidate.password, settings.clipboard_clear_seconds);
+      await api.copyCandidate(candidate.rank);
       toast.show("Copied");
     } catch (e) {
       const err = e as GuiError;
@@ -64,7 +78,7 @@ export default function CandidateRow({
     if (busy) return;
     setBusy(true);
     try {
-      const pw = candidate.password;
+      const pw = revealedText ?? "";
       await api.recordRecoveryFeedback({
         accountId: null,
         provenance: candidate.provenance.map((r) => r.tag),
@@ -96,7 +110,7 @@ export default function CandidateRow({
     <div className={`candidate-row${tried ? " candidate-row--tried" : ""}${feedbackKind !== "none" ? " candidate-row--feedback" : ""}`}>
       <span className="candidate-row__rank">#{candidate.rank}</span>
       <span className="candidate-row__score">{candidate.score.toFixed(2)}</span>
-      <span className="candidate-row__pw">{rowRevealed ? candidate.password : MASK}</span>
+      <span className="candidate-row__pw">{rowRevealed && revealedText !== null ? revealedText : MASK}</span>
       <span className="candidate-row__why" title={provenanceText}>{provenanceText}</span>
       <span className="candidate-row__actions">
         <button

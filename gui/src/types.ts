@@ -43,6 +43,9 @@ export type GuiErrorKind =
   | "InvalidInput"
   | "EmptyVault"
   | "EraNotFound"
+  | "NoActiveRecovery"
+  | "RankOutOfBounds"
+  | "NoPendingImport"
   | "Internal";
 
 export interface GuiError {
@@ -158,7 +161,6 @@ export interface RuleTag {
 export interface CandidateView {
   rank: number;
   score: number;
-  password: string;
   provenance: RuleTag[];
 }
 
