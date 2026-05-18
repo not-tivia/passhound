@@ -469,7 +469,7 @@ impl From<passhound_core::importer::csv::Mapping> for MappingArgs {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct PreviewCounts {
     pub new: usize,
     pub duplicates: usize,
@@ -496,23 +496,13 @@ pub struct PreviewResult {
     pub diagnostics: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CommitResult {
     pub import_id: i64,
     pub counts: PreviewCounts,
 }
 
 const SAMPLE_ROW_LIMIT: usize = 5;
-
-#[tauri::command]
-pub fn import_csv_dry_run(
-    state: State<'_, VaultState>,
-    path: String,
-    site_override: Option<String>,
-    mapping: Option<MappingArgs>,
-) -> Result<PreviewResult, GuiError> {
-    import_csv_dry_run_inner(&state, &std::path::PathBuf::from(path), site_override, mapping)
-}
 
 pub fn import_csv_dry_run_inner(
     state: &VaultState,
@@ -582,16 +572,6 @@ pub fn import_csv_dry_run_inner(
     })
 }
 
-#[tauri::command]
-pub fn import_csv_commit(
-    state: State<'_, VaultState>,
-    path: String,
-    site_override: Option<String>,
-    mapping: Option<MappingArgs>,
-) -> Result<CommitResult, GuiError> {
-    import_csv_commit_inner(&state, &std::path::PathBuf::from(path), site_override, mapping)
-}
-
 pub fn import_csv_commit_inner(
     state: &VaultState,
     path: &std::path::Path,
@@ -637,6 +617,72 @@ pub fn import_csv_commit_inner(
         import_id: import_id.0,
         counts,
     })
+}
+
+#[tauri::command]
+pub async fn pick_and_import_csv_dry_run(
+    app: tauri::AppHandle,
+    state: State<'_, VaultState>,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<Option<PreviewResult>, GuiError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("CSV", &["csv"])
+        .blocking_pick_file();
+    let Some(file_path) = picked else { return Ok(None); };
+
+    let pb: std::path::PathBuf = file_path
+        .into_path()
+        .map_err(|e| GuiError::Internal(format!("dialog path: {e}")))?;
+
+    // Stash the path for the eventual commit.
+    {
+        let mut slot = state.pending_import_path.lock().map_err(poisoned)?;
+        *slot = Some(pb.clone());
+    }
+
+    let preview = import_csv_dry_run_inner(&state, &pb, site_override, mapping)?;
+    Ok(Some(preview))
+}
+
+#[tauri::command]
+pub fn import_csv_commit_pending(
+    state: State<'_, VaultState>,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<CommitResult, GuiError> {
+    import_csv_commit_pending_inner(&state, site_override, mapping)
+}
+
+pub fn import_csv_commit_pending_inner(
+    state: &VaultState,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<CommitResult, GuiError> {
+    let path = {
+        let mut slot = state.pending_import_path.lock().map_err(poisoned)?;
+        slot.take().ok_or(GuiError::NoPendingImport)?
+    };
+    import_csv_commit_inner(state, &path, site_override, mapping)
+}
+
+#[tauri::command]
+pub fn cancel_pending_import(
+    state: State<'_, VaultState>,
+) -> Result<(), GuiError> {
+    cancel_pending_import_inner(&state)
+}
+
+pub fn cancel_pending_import_inner(
+    state: &VaultState,
+) -> Result<(), GuiError> {
+    let mut slot = state.pending_import_path.lock().map_err(poisoned)?;
+    *slot = None;
+    Ok(())
 }
 
 fn read_csv_headers(path: &std::path::Path) -> Result<Vec<String>, GuiError> {
@@ -3024,5 +3070,40 @@ mod tests {
             score: 0.5,
             provenance: vec![],
         };
+    }
+
+    #[test]
+    fn import_csv_commit_pending_errors_with_no_pending_path() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let err = import_csv_commit_pending_inner(&state, None, None).unwrap_err();
+        assert!(matches!(err, GuiError::NoPendingImport));
+    }
+
+    #[test]
+    fn cancel_pending_import_clears_slot() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let mut slot = state.pending_import_path.lock().unwrap();
+            *slot = Some(std::path::PathBuf::from("/tmp/fake.csv"));
+        }
+        cancel_pending_import_inner(&state).unwrap();
+        assert!(state.pending_import_path.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn pending_import_path_cleared_on_lock() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        {
+            let mut slot = state.pending_import_path.lock().unwrap();
+            *slot = Some(std::path::PathBuf::from("/tmp/fake.csv"));
+        }
+        vault_lock_inner(&state).unwrap();
+        assert!(state.pending_import_path.lock().unwrap().is_none());
     }
 }
