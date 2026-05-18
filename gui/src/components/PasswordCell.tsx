@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useToast } from "./Toast";
 import { useSettings } from "../context/SettingsContext";
@@ -20,6 +20,16 @@ export default function PasswordCell({ historyId, onLockedError, onDelete, onPro
   const [editBusy, setEditBusy] = useState(false);
   const toast = useToast();
   const { settings } = useSettings();
+
+  useEffect(() => {
+    if (revealed === null) return;
+    if (settings.reveal_clear_seconds === 0) return;
+    const handle = setTimeout(
+      () => setRevealed(null),
+      settings.reveal_clear_seconds * 1000,
+    );
+    return () => clearTimeout(handle);
+  }, [revealed, settings.reveal_clear_seconds]);
 
   const fetchPlaintext = async (): Promise<string | null> => {
     setBusy(true);

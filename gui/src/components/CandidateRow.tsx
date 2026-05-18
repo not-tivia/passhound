@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useToast } from "./Toast";
 import { useSettings } from "../context/SettingsContext";
@@ -27,6 +27,23 @@ export default function CandidateRow({
   const { settings } = useSettings();
   const [busy, setBusy] = useState(false);
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind>("none");
+  const [rowRevealed, setRowRevealed] = useState(revealed);
+
+  // Keep local rowRevealed in sync with the prop (revealAll toggle).
+  useEffect(() => {
+    setRowRevealed(revealed);
+  }, [revealed]);
+
+  // Auto-mask after reveal_clear_seconds when non-zero.
+  useEffect(() => {
+    if (!rowRevealed) return;
+    if (settings.reveal_clear_seconds === 0) return;
+    const handle = setTimeout(
+      () => setRowRevealed(false),
+      settings.reveal_clear_seconds * 1000,
+    );
+    return () => clearTimeout(handle);
+  }, [rowRevealed, settings.reveal_clear_seconds]);
 
   const handleCopy = async () => {
     if (busy) return;
@@ -79,7 +96,7 @@ export default function CandidateRow({
     <div className={`candidate-row${tried ? " candidate-row--tried" : ""}${feedbackKind !== "none" ? " candidate-row--feedback" : ""}`}>
       <span className="candidate-row__rank">#{candidate.rank}</span>
       <span className="candidate-row__score">{candidate.score.toFixed(2)}</span>
-      <span className="candidate-row__pw">{revealed ? candidate.password : MASK}</span>
+      <span className="candidate-row__pw">{rowRevealed ? candidate.password : MASK}</span>
       <span className="candidate-row__why" title={provenanceText}>{provenanceText}</span>
       <span className="candidate-row__actions">
         <button

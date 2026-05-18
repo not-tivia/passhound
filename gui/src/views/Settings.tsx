@@ -68,6 +68,15 @@ export default function Settings({ onLockedError, onLock }: SettingsProps) {
           value={settings.clipboard_clear_seconds}
           onSave={(seconds) => save({ key: "clipboard_clear_seconds", value: seconds })}
         />
+        <SettingNumberInput
+          label="Auto-mask revealed passwords after"
+          unit="seconds"
+          hint="0 = off"
+          min={0}
+          max={600}
+          value={settings.reveal_clear_seconds}
+          onSave={(seconds) => save({ key: "reveal_clear_seconds", value: seconds })}
+        />
       </SettingsSection>
 
       <SettingsSection title="RECOVERY">

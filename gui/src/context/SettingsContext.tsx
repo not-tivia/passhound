@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: SettingsView = {
   clipboard_clear_seconds: 0,
   analyze_top_n: 10,
   default_reveal: false,
+  reveal_clear_seconds: 0,
 };
 
 const SettingsContext = createContext<SettingsContextValue>({

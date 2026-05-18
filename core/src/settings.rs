@@ -14,6 +14,7 @@ pub struct SettingsView {
     pub clipboard_clear_seconds: u32,
     pub analyze_top_n: u32,
     pub default_reveal: bool,
+    pub reveal_clear_seconds: u32,  // 0 = off, otherwise N seconds.
 }
 
 impl Default for SettingsView {
@@ -23,6 +24,7 @@ impl Default for SettingsView {
             clipboard_clear_seconds: 0,
             analyze_top_n: 10,
             default_reveal: false,
+            reveal_clear_seconds: 0,  // 0 = off
         }
     }
 }
@@ -31,6 +33,7 @@ pub const KEY_IDLE_LOCK: &str = "settings.idle_lock_seconds";
 pub const KEY_CLIPBOARD_CLEAR: &str = "settings.clipboard_clear_seconds";
 pub const KEY_ANALYZE_TOP_N: &str = "settings.analyze_top_n";
 pub const KEY_DEFAULT_REVEAL: &str = "settings.default_reveal";
+pub const KEY_REVEAL_CLEAR_SECONDS: &str = "settings.reveal_clear_seconds";
 
 const MAX_SECONDS: u32 = 86_400;
 const MAX_ANALYZE_TOP_N: u32 = 100;
@@ -80,12 +83,13 @@ pub fn get(vault: &Vault) -> Result<SettingsView> {
         clipboard_clear_seconds: read_u32(vault, KEY_CLIPBOARD_CLEAR, d.clipboard_clear_seconds)?,
         analyze_top_n: read_u32(vault, KEY_ANALYZE_TOP_N, d.analyze_top_n)?,
         default_reveal: read_bool(vault, KEY_DEFAULT_REVEAL, d.default_reveal)?,
+        reveal_clear_seconds: read_u32(vault, KEY_REVEAL_CLEAR_SECONDS, d.reveal_clear_seconds)?,
     })
 }
 
 pub fn set_u32(vault: &Vault, key: &str, value: u32) -> Result<()> {
     let clamped = match key {
-        KEY_IDLE_LOCK | KEY_CLIPBOARD_CLEAR => value.min(MAX_SECONDS),
+        KEY_IDLE_LOCK | KEY_CLIPBOARD_CLEAR | KEY_REVEAL_CLEAR_SECONDS => value.min(MAX_SECONDS),
         KEY_ANALYZE_TOP_N => value.clamp(MIN_ANALYZE_TOP_N, MAX_ANALYZE_TOP_N),
         _ => value,
     };
@@ -155,6 +159,16 @@ mod tests {
         assert_eq!(get(&v).unwrap().analyze_top_n, 100);
         set_u32(&v, KEY_ANALYZE_TOP_N, 0).unwrap();
         assert_eq!(get(&v).unwrap().analyze_top_n, 1);
+    }
+
+    #[test]
+    fn reveal_clear_seconds_round_trip_and_clamp() {
+        let (_t, v) = vault();
+        set_u32(&v, KEY_REVEAL_CLEAR_SECONDS, 30).unwrap();
+        assert_eq!(get(&v).unwrap().reveal_clear_seconds, 30);
+        // Clamps at MAX_SECONDS (86400).
+        set_u32(&v, KEY_REVEAL_CLEAR_SECONDS, 999_999).unwrap();
+        assert_eq!(get(&v).unwrap().reveal_clear_seconds, 86_400);
     }
 
     #[test]

@@ -1401,6 +1401,7 @@ pub struct SettingsView {
     pub clipboard_clear_seconds: u32,
     pub analyze_top_n: u32,
     pub default_reveal: bool,
+    pub reveal_clear_seconds: u32,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -1410,6 +1411,7 @@ pub enum SettingChange {
     ClipboardClearSeconds(u32),
     AnalyzeTopN(u32),
     DefaultReveal(bool),
+    RevealClearSeconds(u32),
 }
 
 #[tauri::command]
@@ -1426,6 +1428,7 @@ pub fn get_settings_inner(state: &VaultState) -> Result<SettingsView, GuiError> 
         clipboard_clear_seconds: s.clipboard_clear_seconds,
         analyze_top_n: s.analyze_top_n,
         default_reveal: s.default_reveal,
+        reveal_clear_seconds: s.reveal_clear_seconds,
     })
 }
 
@@ -1446,6 +1449,7 @@ pub fn set_setting_inner(state: &VaultState, change: SettingChange) -> Result<()
         SettingChange::ClipboardClearSeconds(n) => settings::set_u32(v, settings::KEY_CLIPBOARD_CLEAR, n)?,
         SettingChange::AnalyzeTopN(n) => settings::set_u32(v, settings::KEY_ANALYZE_TOP_N, n)?,
         SettingChange::DefaultReveal(b) => settings::set_bool(v, settings::KEY_DEFAULT_REVEAL, b)?,
+        SettingChange::RevealClearSeconds(n) => settings::set_u32(v, settings::KEY_REVEAL_CLEAR_SECONDS, n)?,
     }
     Ok(())
 }
@@ -2524,6 +2528,17 @@ mod tests {
         // Untouched keys retain defaults.
         assert_eq!(s.clipboard_clear_seconds, 0);
         assert_eq!(s.analyze_top_n, 10);
+    }
+
+    #[test]
+    fn set_setting_reveal_clear_seconds_round_trip() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        set_setting_inner(&state, SettingChange::RevealClearSeconds(45)).unwrap();
+        let view = get_settings_inner(&state).unwrap();
+        assert_eq!(view.reveal_clear_seconds, 45);
     }
 
     #[test]

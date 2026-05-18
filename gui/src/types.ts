@@ -194,13 +194,15 @@ export interface SettingsView {
   clipboard_clear_seconds: number;
   analyze_top_n: number;
   default_reveal: boolean;
+  reveal_clear_seconds: number;
 }
 
 export type SettingChange =
   | { key: "idle_lock_seconds"; value: number }
   | { key: "clipboard_clear_seconds"; value: number }
   | { key: "analyze_top_n"; value: number }
-  | { key: "default_reveal"; value: boolean };
+  | { key: "default_reveal"; value: boolean }
+  | { key: "reveal_clear_seconds"; value: number };
 
 // Phase 4.12 — Recovery feedback
 
