@@ -74,6 +74,7 @@ impl Vault {
             params![META_VERIFIER_NONCE, verifier_nonce.as_slice()],
         )?;
         tx.commit()?;
+        chmod_journal_if_present(path);
 
         Ok(Self { conn, path: path.into(), key: Some(key) })
     }
@@ -93,6 +94,7 @@ impl Vault {
         let tx = conn.unchecked_transaction()?;
         schema::apply_migrations(&tx)?;
         tx.commit()?;
+        chmod_journal_if_present(path);
         Ok(Self { conn, path: path.into(), key: None })
     }
 
@@ -281,6 +283,28 @@ impl Vault {
         Ok(())
     }
 }
+
+/// Best-effort: chmod the SQLite rollback-journal sidecar to 0600 if it exists.
+///
+/// SQLite creates `<dbfile>-journal` during a transaction and normally deletes it
+/// on commit. If the file is present (long-running tx, crash recovery), it holds
+/// the same encrypted blob bytes + plaintext metadata columns as the main vault
+/// file and deserves the same owner-only permissions.
+///
+/// The `.exists()` guard and the ignored error handle the inevitable race where
+/// SQLite deletes the journal between our check and the chmod call.
+#[cfg(unix)]
+pub fn chmod_journal_if_present(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let journal = path.with_extension("db-journal");
+    if journal.exists() {
+        let perms = std::fs::Permissions::from_mode(0o600);
+        let _ = std::fs::set_permissions(&journal, perms);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn chmod_journal_if_present(_path: &std::path::Path) {}
 
 #[cfg(test)]
 mod tests {
