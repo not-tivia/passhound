@@ -2511,6 +2511,7 @@ mod tests {
         let s = get_settings_inner(&state).unwrap();
         assert_eq!(s.idle_lock_seconds, 0);
         assert_eq!(s.clipboard_clear_seconds, 0);
+        assert_eq!(s.reveal_clear_seconds, 0);
         assert_eq!(s.analyze_top_n, 10);
         assert!(!s.default_reveal);
     }

@@ -33,7 +33,9 @@ export default function SettingNumberInput({
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => {
       const parsed = parseInt(raw, 10);
-      const next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+      let next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+      if (typeof min === "number") next = Math.max(min, next);
+      if (typeof max === "number") next = Math.min(max, next);
       void onSave(next);
     }, DEBOUNCE_MS);
   };
