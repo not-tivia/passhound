@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import type {
   AccountSummary,
   AccountDetail,
@@ -174,8 +175,20 @@ export const api = {
   copyToClipboardWithAutoClear: async (text: string, clipboardClearSeconds: number) => {
     await call<void>("copy_to_clipboard", { text });
     if (clipboardClearSeconds > 0) {
-      window.setTimeout(() => {
-        call<void>("copy_to_clipboard", { text: "" }).catch(() => {});
+      window.setTimeout(async () => {
+        try {
+          // Read-before-clear: only wipe the clipboard if it still contains the
+          // value PassHound wrote. If the user has since copied something else,
+          // leave their clipboard alone — clearing it would be confusing and
+          // the sensitive value is already gone.
+          const current = await readText();
+          if (current === text) {
+            await call<void>("copy_to_clipboard", { text: "" });
+          }
+        } catch {
+          // Clipboard read failure (e.g. permission denied on some platforms):
+          // give up silently rather than unconditionally clearing.
+        }
       }, clipboardClearSeconds * 1000);
     }
   },

@@ -36,20 +36,55 @@ pub fn parse_str(input: &str) -> ParseResult {
     result
 }
 
+/// All field prefixes that begin a new named field.  Keeping this list in one
+/// place guarantees the raw-redaction logic and the field-dispatch loop stay in
+/// sync — add a new prefix here and both behaviours update automatically.
+const FIELD_PREFIXES: &[&str] = &[
+    "site:", "name:", "website:", "title:", "service:",
+    "url:",
+    "username:", "user:", "login:", "email:",
+    "password:", "pass:",
+    "notes:", "note:", "comment:",
+];
+
+/// Returns true if `line` starts with any of the recognised field prefixes
+/// (case-insensitive), i.e. it opens a new field rather than continuing the
+/// previous one.
+fn starts_new_field(line: &str) -> bool {
+    FIELD_PREFIXES.iter().any(|p| strip_prefix_ci(line, p).is_some())
+}
+
 fn process_block(lines: &[&str], start_row: usize, result: &mut ParseResult) {
-    // Build a redacted version of raw: any line whose key prefix is
-    // `password:` or `pass:` has its value replaced with `<redacted>`.
-    // This is used for both `ParseDiagnostic.raw` and `ImportEntry.source_row`
-    // so the plaintext password is never stored in diagnostics or logs.
+    // Build a redacted version of raw for both `ParseDiagnostic.raw` and
+    // `ImportEntry.source_row` so the plaintext password is never stored in
+    // diagnostics or logs.
+    //
+    // The loop is stateful: once we enter a password:/pass: block we keep
+    // redacting every continuation line (lines with no recognised field prefix)
+    // until a new named field begins or a blank line resets the block.
+    let mut in_password_block = false;
     let raw: String = lines
         .iter()
         .map(|line| {
             if strip_prefix_ci(line, "password:").is_some()
                 || strip_prefix_ci(line, "pass:").is_some()
             {
+                in_password_block = true;
                 // Preserve the prefix, replace value with <redacted>.
                 let colon_pos = line.find(':').expect("prefix matched means colon exists");
                 format!("{}: <redacted>", &line[..colon_pos])
+            } else if starts_new_field(line) {
+                // A different named field resets the password-block context.
+                in_password_block = false;
+                line.to_string()
+            } else if line.trim().is_empty() {
+                // Blank lines reset context (shouldn't appear within a block,
+                // but guard anyway).
+                in_password_block = false;
+                line.to_string()
+            } else if in_password_block {
+                // Continuation line belonging to the password field — redact it.
+                "<redacted>".to_string()
             } else {
                 line.to_string()
             }
@@ -295,5 +330,32 @@ password: pw
         assert_eq!(r.entries.len(), 0);
         assert_eq!(r.diagnostics.len(), 1);
         assert!(r.diagnostics[0].reason.contains("site/url"));
+    }
+
+    #[test]
+    fn parse_diagnostic_raw_redacts_password_continuation_lines() {
+        let secret_first = "S3cret-FirstLine!";
+        let secret_cont = "Continuation-Secret-Line!";
+        let content = format!(
+            "site: Example\npassword: {secret_first}\n{secret_cont}\nuser: chris\n"
+        );
+        let r = parse_str(&content);
+
+        // The block is complete (site + password + user), so it should become
+        // an ImportEntry.  source_row holds the redacted raw text.
+        assert_eq!(r.entries.len(), 1, "expected one parsed entry");
+        let raw_to_check = r.entries[0]
+            .source_row
+            .as_deref()
+            .expect("source_row must be set");
+
+        assert!(
+            !raw_to_check.contains(secret_first),
+            "first password line must be redacted in source_row: {raw_to_check:?}"
+        );
+        assert!(
+            !raw_to_check.contains(secret_cont),
+            "continuation line must also be redacted in source_row: {raw_to_check:?}"
+        );
     }
 }
