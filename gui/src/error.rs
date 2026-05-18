@@ -19,6 +19,12 @@ pub enum GuiError {
     EmptyVault,
     #[error("no era named '{0}'")]
     EraNotFound(String),
+    #[error("no active recovery — call recover_candidates first")]
+    NoActiveRecovery,
+    #[error("candidate rank out of bounds")]
+    RankOutOfBounds,
+    #[error("no pending import — call pick_and_import_csv_dry_run first")]
+    NoPendingImport,
     #[error("internal: {0}")]
     Internal(String),
 }
