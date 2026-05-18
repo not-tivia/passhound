@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import type {
   AccountSummary,
@@ -50,39 +50,32 @@ export const api = {
     call<string>("reveal_password", { historyId }),
   copyToClipboard: (text: string) => call<void>("copy_to_clipboard", { text }),
 
-  // Phase 4.2 — CSV import
-  importCsvDryRun: (
-    path: string,
+  // Phase 4.2 / 4.16 — CSV import (pending-path model)
+  pickAndImportCsvDryRun: (
     siteOverride: string | null,
     mapping: Mapping | null,
   ) =>
-    call<PreviewResult>("import_csv_dry_run", {
-      path,
+    call<PreviewResult | null>("pick_and_import_csv_dry_run", {
       siteOverride,
       mapping,
     }),
-  importCsvCommit: (
-    path: string,
+  importCsvDryRunWithPending: (
     siteOverride: string | null,
     mapping: Mapping | null,
   ) =>
-    call<CommitResult>("import_csv_commit", {
-      path,
+    call<PreviewResult>("import_csv_dry_run_with_pending", {
       siteOverride,
       mapping,
     }),
-
-  // Native file picker via @tauri-apps/plugin-dialog. Returns null if user
-  // cancels.
-  pickCsvFile: async (): Promise<string | null> => {
-    const result = await openDialog({
-      multiple: false,
-      directory: false,
-      filters: [{ name: "CSV", extensions: ["csv", "CSV"] }],
-    });
-    if (typeof result === "string") return result;
-    return null;
-  },
+  importCsvCommitPending: (
+    siteOverride: string | null,
+    mapping: Mapping | null,
+  ) =>
+    call<CommitResult>("import_csv_commit_pending", {
+      siteOverride,
+      mapping,
+    }),
+  cancelPendingImport: () => call<void>("cancel_pending_import"),
 
   // Phase 4.4 — Attachments
   listAttachments: (accountId: number) =>

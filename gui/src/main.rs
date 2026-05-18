@@ -19,6 +19,7 @@ fn main() {
             reveal_password,
             copy_to_clipboard,
             pick_and_import_csv_dry_run,
+            import_csv_dry_run_with_pending,
             import_csv_commit_pending,
             cancel_pending_import,
             list_attachments,

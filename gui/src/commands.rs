@@ -685,6 +685,27 @@ pub fn cancel_pending_import_inner(
     Ok(())
 }
 
+#[tauri::command]
+pub fn import_csv_dry_run_with_pending(
+    state: State<'_, VaultState>,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<PreviewResult, GuiError> {
+    import_csv_dry_run_with_pending_inner(&state, site_override, mapping)
+}
+
+pub fn import_csv_dry_run_with_pending_inner(
+    state: &VaultState,
+    site_override: Option<String>,
+    mapping: Option<MappingArgs>,
+) -> Result<PreviewResult, GuiError> {
+    let path = {
+        let slot = state.pending_import_path.lock().map_err(poisoned)?;
+        slot.clone().ok_or(GuiError::NoPendingImport)?
+    };
+    import_csv_dry_run_inner(state, &path, site_override, mapping)
+}
+
 fn read_csv_headers(path: &std::path::Path) -> Result<Vec<String>, GuiError> {
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(true)
@@ -3079,6 +3100,17 @@ mod tests {
         vault_create_inner(&state, &path, b"pw").unwrap();
         let err = import_csv_commit_pending_inner(&state, None, None).unwrap_err();
         assert!(matches!(err, GuiError::NoPendingImport));
+    }
+
+    #[test]
+    fn import_csv_dry_run_with_pending_errors_with_no_pending() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        match import_csv_dry_run_with_pending_inner(&state, None, None) {
+            Err(GuiError::NoPendingImport) => {}
+            other => panic!("expected NoPendingImport, got {:?}", other.err()),
+        }
     }
 
     #[test]

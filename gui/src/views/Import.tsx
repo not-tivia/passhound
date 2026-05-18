@@ -16,7 +16,7 @@ interface ImportProps {
 }
 
 export default function Import({ onDone, onLockedError }: ImportProps) {
-  const [path, setPath] = useState<string | null>(null);
+  const [hasPending, setHasPending] = useState(false);
   const [siteOverride, setSiteOverride] = useState("");
   const [roles, setRoles] = useState<ColumnRole[]>([]);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -25,21 +25,24 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toast = useToast();
 
-  const refreshPreview = async (
-    p: string,
+  // Best-effort: clear any pending import slot if user navigates away.
+  useEffect(() => {
+    return () => {
+      api.cancelPendingImport().catch(() => {});
+    };
+  }, []);
+
+  const refreshPreviewWithPending = async (
     site: string | null,
     currentRoles: ColumnRole[] | null,
   ) => {
     setError(null);
     try {
-      // If we already have roles (user has been editing), send the derived
-      // mapping. On first preview after picking a file, send null so the
-      // backend uses auto-detect.
       const mapping =
         currentRoles && currentRoles.length > 0
           ? rolesToMapping(currentRoles)
           : null;
-      const result = await api.importCsvDryRun(p, site, mapping);
+      const result = await api.importCsvDryRunWithPending(site, mapping);
       setPreview(result);
       // Sync roles to the effective mapping on the first preview only —
       // don't clobber the user's in-progress edits.
@@ -59,36 +62,42 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
 
   // Debounced refresh when site override or roles change (after a file is picked).
   useEffect(() => {
-    if (!path) return;
+    if (!hasPending) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      refreshPreview(path, siteOverride || null, roles);
+      refreshPreviewWithPending(siteOverride || null, roles);
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, siteOverride, roles]);
+  }, [hasPending, siteOverride, roles]);
 
   const handleBrowse = async () => {
     try {
-      const picked = await api.pickCsvFile();
-      if (picked) {
-        setPath(picked);
-        setRoles([]);  // Reset; refreshPreview will populate from auto-detect.
-        setPreview(null);
-        setError(null);
-        // Immediate first refresh (no debounce on file pick).
-        await refreshPreview(picked, siteOverride || null, null);
+      const mapping = roles.length > 0 ? rolesToMapping(roles) : null;
+      const result = await api.pickAndImportCsvDryRun(siteOverride || null, mapping);
+      if (result === null) {
+        // User cancelled the dialog — do nothing.
+        return;
       }
+      setHasPending(true);
+      setRoles([]);  // Reset; result already has auto-detected mapping.
+      setPreview(result);
+      setError(null);
+      setRoles(mappingToRoles(result.headers, result.effective_mapping));
     } catch (e) {
       const err = e as GuiError;
+      if (err.kind === "Locked") {
+        onLockedError();
+        return;
+      }
       setError(err.message ?? `dialog: ${err.kind}`);
     }
   };
 
   const handleImport = async () => {
-    if (!path || !preview) return;
+    if (!hasPending || !preview) return;
     const validationErr = validateRoles(roles);
     if (validationErr) {
       setError(validationErr);
@@ -98,8 +107,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
     setError(null);
     try {
       const mapping = rolesToMapping(roles);
-      const result = await api.importCsvCommit(
-        path,
+      const result = await api.importCsvCommitPending(
         siteOverride || null,
         mapping,
       );
@@ -117,6 +125,11 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
     }
   };
 
+  const handleCancel = () => {
+    api.cancelPendingImport().catch(() => {});
+    onDone();
+  };
+
   const validationErr = roles.length > 0 ? validateRoles(roles) : null;
   const importDisabled = !preview || submitting || validationErr !== null;
 
@@ -129,7 +142,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
           <input
             className="import-view__path"
             placeholder="No file selected"
-            value={path ?? ""}
+            value={preview ? "(file selected)" : ""}
             readOnly
           />
           <button
@@ -147,7 +160,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
             placeholder="(optional — use only for per-site CSVs)"
             value={siteOverride}
             onChange={(e) => setSiteOverride(e.target.value)}
-            disabled={!path || submitting}
+            disabled={!hasPending || submitting}
           />
         </div>
 
@@ -176,7 +189,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
       <div className="import-view__footer">
         <button
           className="import-view__btn import-view__btn--ghost"
-          onClick={onDone}
+          onClick={handleCancel}
           disabled={submitting}
         >
           Cancel
