@@ -1282,6 +1282,57 @@ pub fn recover_candidates_inner(
 }
 
 #[tauri::command]
+pub fn reveal_candidate(
+    state: State<'_, VaultState>,
+    rank: usize,
+) -> Result<String, GuiError> {
+    reveal_candidate_inner(&state, rank)
+}
+
+pub fn reveal_candidate_inner(
+    state: &VaultState,
+    rank: usize,
+) -> Result<String, GuiError> {
+    // Verify vault is unlocked; we don't need the vault itself but we
+    // do not want to leak cache contents post-lock.
+    {
+        let guard = state.vault.lock().map_err(poisoned)?;
+        if guard.is_none() {
+            return Err(GuiError::Locked);
+        }
+    }
+    let cache = state.candidate_cache.lock().map_err(poisoned)?;
+    if cache.is_empty() {
+        return Err(GuiError::NoActiveRecovery);
+    }
+    let idx = rank.checked_sub(1).ok_or(GuiError::RankOutOfBounds)?;
+    let pt = cache.get(idx).ok_or(GuiError::RankOutOfBounds)?;
+    Ok(pt.to_string())
+}
+
+#[tauri::command]
+pub fn copy_candidate(
+    app: tauri::AppHandle,
+    state: State<'_, VaultState>,
+    rank: usize,
+) -> Result<(), GuiError> {
+    copy_candidate_inner(&app, &state, rank)
+}
+
+pub fn copy_candidate_inner(
+    app: &tauri::AppHandle,
+    state: &VaultState,
+    rank: usize,
+) -> Result<(), GuiError> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let pt = reveal_candidate_inner(state, rank)?;
+    app.clipboard()
+        .write_text(&pt)
+        .map_err(|e| GuiError::Internal(format!("clipboard: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn list_eras(state: State<'_, VaultState>) -> Result<Vec<EraSummary>, GuiError> {
     list_eras_inner(&state)
 }
@@ -2865,5 +2916,113 @@ mod tests {
         // Verify duplicate rejection.
         let err = add_base_word_inner(&state, "moonbeam".into()).unwrap_err();
         let _ = err;  // Some GuiError variant; the exact mapping depends on existing From impls.
+    }
+
+    fn seed_vault_with_history(state: &VaultState) {
+        let guard = state.vault.lock().unwrap();
+        let v = guard.as_ref().unwrap();
+        let s = sites::create(v, sites::NewSite {
+            name: "Reddit".into(),
+            url: Some("reddit.com".into()),
+            category: Some("Social".into()),
+            abbreviations: vec!["Rd".into()],
+            notes: None,
+        }).unwrap();
+        let a = accounts::create(v, accounts::NewAccount {
+            site_id: s.id,
+            username: Some("chris".into()),
+            ..Default::default()
+        }).unwrap();
+        passwords::set_current(v, a.id, "MoonBeam$2019Rd", "manual").unwrap();
+        passwords::set_current(v, a.id, "MoonBeam$2020Rd", "manual").unwrap();
+        passwords::set_current(v, a.id, "MoonBeam$2021Rd", "manual").unwrap();
+    }
+
+    #[test]
+    fn reveal_candidate_returns_plaintext_for_valid_rank() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        seed_vault_with_history(&state);
+
+        recover_candidates_inner(&state, &RecoverFilters {
+            site: None, account: None, era: None, hint: None,
+            limit: 5, min_length: None, require_symbol: false, require_digit: false,
+        }).unwrap();
+
+        let plaintext = reveal_candidate_inner(&state, 1).unwrap();
+        assert!(!plaintext.is_empty(), "expected non-empty plaintext at rank 1");
+    }
+
+    #[test]
+    fn reveal_candidate_errors_on_empty_cache() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        // No recovery run.
+        let err = reveal_candidate_inner(&state, 1).unwrap_err();
+        assert!(matches!(err, GuiError::NoActiveRecovery),
+            "expected NoActiveRecovery, got {err:?}");
+    }
+
+    #[test]
+    fn reveal_candidate_errors_on_rank_out_of_bounds() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        seed_vault_with_history(&state);
+        recover_candidates_inner(&state, &RecoverFilters {
+            site: None, account: None, era: None, hint: None,
+            limit: 3, min_length: None, require_symbol: false, require_digit: false,
+        }).unwrap();
+        let err = reveal_candidate_inner(&state, 999).unwrap_err();
+        assert!(matches!(err, GuiError::RankOutOfBounds));
+    }
+
+    #[test]
+    fn reveal_candidate_errors_when_locked() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        seed_vault_with_history(&state);
+        recover_candidates_inner(&state, &RecoverFilters {
+            site: None, account: None, era: None, hint: None,
+            limit: 3, min_length: None, require_symbol: false, require_digit: false,
+        }).unwrap();
+        vault_lock_inner(&state).unwrap();
+        let err = reveal_candidate_inner(&state, 1).unwrap_err();
+        // After Task 1's lock-clears-cache, the cache is empty AND the vault is locked.
+        // The vault-locked check fires first, returning Locked. But if the implementer
+        // changes that order, NoActiveRecovery is also acceptable.
+        assert!(
+            matches!(err, GuiError::Locked | GuiError::NoActiveRecovery),
+            "expected Locked or NoActiveRecovery, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn candidate_cache_cleared_on_lock() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        seed_vault_with_history(&state);
+        recover_candidates_inner(&state, &RecoverFilters {
+            site: None, account: None, era: None, hint: None,
+            limit: 5, min_length: None, require_symbol: false, require_digit: false,
+        }).unwrap();
+        assert!(!state.candidate_cache.lock().unwrap().is_empty());
+        vault_lock_inner(&state).unwrap();
+        assert!(state.candidate_cache.lock().unwrap().is_empty(),
+            "cache must be empty after lock");
+    }
+
+    #[test]
+    fn candidate_view_has_no_password_field() {
+        // Compile-time check: this literal would fail to build if a `password` field were re-added.
+        let _: CandidateView = CandidateView {
+            rank: 1,
+            score: 0.5,
+            provenance: vec![],
+        };
     }
 }

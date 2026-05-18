@@ -43,6 +43,8 @@ fn main() {
             add_password,
             promote_password,
             recover_candidates,
+            reveal_candidate,
+            copy_candidate,
             list_eras,
             list_base_words,
             promote_base_word,
