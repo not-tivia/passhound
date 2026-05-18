@@ -296,7 +296,9 @@ impl Vault {
 #[cfg(unix)]
 pub(crate) fn chmod_journal_if_present(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
-    let journal = path.with_extension("db-journal");
+    let mut journal_os = path.as_os_str().to_owned();
+    journal_os.push("-journal");
+    let journal = std::path::PathBuf::from(journal_os);
     if journal.exists() {
         let perms = std::fs::Permissions::from_mode(0o600);
         let _ = std::fs::set_permissions(&journal, perms);
