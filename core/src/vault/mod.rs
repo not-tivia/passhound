@@ -294,7 +294,7 @@ impl Vault {
 /// The `.exists()` guard and the ignored error handle the inevitable race where
 /// SQLite deletes the journal between our check and the chmod call.
 #[cfg(unix)]
-pub fn chmod_journal_if_present(path: &std::path::Path) {
+pub(crate) fn chmod_journal_if_present(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     let journal = path.with_extension("db-journal");
     if journal.exists() {
@@ -304,7 +304,7 @@ pub fn chmod_journal_if_present(path: &std::path::Path) {
 }
 
 #[cfg(not(unix))]
-pub fn chmod_journal_if_present(_path: &std::path::Path) {}
+pub(crate) fn chmod_journal_if_present(_path: &std::path::Path) {}
 
 #[cfg(test)]
 mod tests {
@@ -460,6 +460,37 @@ mod tests {
         v.unlock(b"actual").unwrap();
         assert!(v.is_unlocked());
         assert!(Vault::open(&path).unwrap().unlock(b"new").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_journal_helper_sets_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("v.db");
+        let journal_path = tmp.path().join("v.db-journal");
+
+        // Pre-stage a journal sidecar with permissive perms.
+        std::fs::write(&journal_path, b"fake journal contents").unwrap();
+        std::fs::set_permissions(&journal_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            std::fs::metadata(&journal_path).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "pre-condition: journal starts at 0644"
+        );
+
+        // Drive the helper.
+        super::chmod_journal_if_present(&db_path);
+
+        // Assert post-condition.
+        let mode = std::fs::metadata(&journal_path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "expected 0600 on the staged journal sidecar after chmod helper, got 0{:o}",
+            mode & 0o777
+        );
     }
 
     #[test]
