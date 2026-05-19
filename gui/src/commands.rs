@@ -2703,7 +2703,9 @@ mod tests {
         assert!(!result.is_empty(), "recovery should produce candidates");
         for (i, c) in result.iter().enumerate() {
             assert_eq!(c.rank, i + 1, "rank should be 1-indexed and sequential");
-            assert!(c.score >= 0.0 && c.score <= 1.6, "score in expected range: {}", c.score);
+            // Upper bound: sum of all weights (2.05) * EraBoost max (1.5) = 3.075;
+            // W_HISTORY_SEED = 1.0 was added in Phase 4.19 raising the ceiling.
+            assert!(c.score >= 0.0 && c.score <= 3.5, "score in expected range: {}", c.score);
         }
         {
             let cache = state.candidate_cache.lock().unwrap();

@@ -18,6 +18,9 @@ impl ScoreModifier for EraBoost {
         let proximity = (1.0 - (dist_years / 5.0)).clamp(0.0, 1.0);
         let multiplier = 1.0 + 0.5 * proximity;
         c.score *= multiplier;
+        if let Some(b) = c.breakdown.as_mut() {
+            b.total = c.score;
+        }
         if !c.provenance.contains(&RuleId::EraBoost) {
             c.provenance.push(RuleId::EraBoost);
         }

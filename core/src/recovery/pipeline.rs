@@ -7,7 +7,7 @@ use crate::recovery::generators::GENERATORS;
 use crate::recovery::pool;
 use crate::recovery::score::{ranking, SCORE_MODIFIERS};
 use crate::recovery::transformers::TRANSFORMERS;
-use crate::recovery::{Candidate, HistoryStats, RecoverConfig, RecoverContext};
+use crate::recovery::{Candidate, HistoryStats, RecoverConfig, RecoverContext, RuleId};
 use crate::vault::Vault;
 use std::collections::HashMap;
 
@@ -38,7 +38,7 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
         seeds.push(Candidate {
             password: zeroize::Zeroizing::new(ps.plaintext.as_str().to_owned()),
             score: 0.0,
-            provenance: vec![],
+            provenance: vec![RuleId::HistorySeed],
             seed_history_id: Some(ps.history_id),
             breakdown: None,
         });
@@ -106,7 +106,9 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
     // performance characteristics of internal pruning).
     let multipliers = feedback::compute_multipliers(vault)?;
     for c in &mut fan {
-        c.score = ranking::score(c, &ctx, Some(&multipliers));
+        let (total, breakdown) = ranking::score_with_breakdown(c, &ctx, Some(&multipliers));
+        c.score = total;
+        c.breakdown = Some(breakdown);
     }
     for m in SCORE_MODIFIERS {
         for c in &mut fan {
@@ -336,6 +338,21 @@ mod tests {
             "expected 'MoonBeam$2019Rd' in candidates; got {} candidates, sample: {:?}",
             strs.len(),
             strs.iter().take(20).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn pool_seeds_carry_history_seed_provenance() {
+        let (_t, v) = vault_with_history(&["MoonBeam$2014", "Fluffy!2015"]);
+        extract_base_words_from_history(&v, 2).unwrap();
+        let cfg = RecoverConfig { limit: 50, ..Default::default() };
+        let candidates = recover(&v, cfg).unwrap();
+        let any_history_seed = candidates.iter().any(|c| {
+            c.seed_history_id.is_some() && c.provenance.contains(&RuleId::HistorySeed)
+        });
+        assert!(
+            any_history_seed,
+            "expected at least one candidate with seed_history_id AND RuleId::HistorySeed in provenance",
         );
     }
 }
