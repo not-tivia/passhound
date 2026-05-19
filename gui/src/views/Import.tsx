@@ -96,7 +96,10 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
     }
   };
 
-  // Debounced refresh when site override, roles, or patches change (after a file is picked).
+  // Debounced refresh when site override or roles change (after a file is
+  // picked). Patches (bulk + per-row) are NOT in the dep array — they fire
+  // a re-parse only on input blur via commitPatches(), so the user can
+  // finish typing without the row promoting on every keystroke.
   useEffect(() => {
     if (!hasPending) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -107,7 +110,15 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPending, siteOverride, roles, bulkPatch, rowPatches]);
+  }, [hasPending, siteOverride, roles]);
+
+  // Fire a re-parse on patch input blur. Reads current patches from state
+  // at call time (not via dep array) so the user's just-typed value is
+  // included even though typing didn't trigger the debounce.
+  const commitPatches = () => {
+    if (!hasPending) return;
+    refreshPreviewWithPending(siteOverride || null, roles, buildPatches());
+  };
 
   // Prune stale row patches when diagnostics change (e.g. after re-parse shifts rows).
   useEffect(() => {
@@ -260,6 +271,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
                     return next;
                   })
                 }
+                onCommitPatches={commitPatches}
               />
             )}
           </>

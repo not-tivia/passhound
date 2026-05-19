@@ -14,6 +14,11 @@ type SkippedRowsPanelProps = {
   rowPatches: Map<number, { site?: string; password?: string }>;
   onBulkChange: (field: "site" | "password", value: string) => void;
   onRowChange: (row: number, field: "site" | "password", value: string) => void;
+  /** Called when a patch input loses focus — triggers a re-parse with the
+   * current patches. Letting onChange auto-fire would re-parse on every
+   * keystroke and promote partially-typed values, deleting the row the
+   * user is still editing. */
+  onCommitPatches: () => void;
 };
 
 export default function SkippedRowsPanel({
@@ -22,6 +27,7 @@ export default function SkippedRowsPanel({
   rowPatches,
   onBulkChange,
   onRowChange,
+  onCommitPatches,
 }: SkippedRowsPanelProps) {
   if (diagnostics.length === 0) return null;
 
@@ -45,6 +51,7 @@ export default function SkippedRowsPanel({
               type="text"
               value={bulkPatch.site}
               onChange={(e) => onBulkChange("site", e.target.value)}
+              onBlur={onCommitPatches}
               placeholder="(site name)"
             />
           </label>
@@ -62,6 +69,7 @@ export default function SkippedRowsPanel({
               type="text"
               value={bulkPatch.password}
               onChange={(e) => onBulkChange("password", e.target.value)}
+              onBlur={onCommitPatches}
               placeholder="(password)"
             />
           </label>
@@ -99,6 +107,7 @@ export default function SkippedRowsPanel({
                         onChange={(e) =>
                           onRowChange(d.row, "site", e.target.value)
                         }
+                        onBlur={onCommitPatches}
                       />
                     </label>
                   )}
@@ -111,6 +120,7 @@ export default function SkippedRowsPanel({
                         onChange={(e) =>
                           onRowChange(d.row, "password", e.target.value)
                         }
+                        onBlur={onCommitPatches}
                       />
                     </label>
                   )}
