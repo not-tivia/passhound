@@ -2022,3 +2022,72 @@ select option {
   margin-top: 0.5rem;
   padding: 0.4rem 0.8rem;
 }
+
+/* ============================================================================
+   Phase 4.17 Task 6 — AccountsTable era pill dropdown
+   ============================================================================ */
+
+.accounts-table__pill-wrapper {
+  position: relative;
+  display: inline-block;
+}
+.accounts-table__pill--filter-active {
+  background: var(--accent);
+  color: var(--bg-1);
+  border-color: var(--accent);
+}
+.accounts-table__pill-clear {
+  margin-left: 0.25rem;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.accounts-table__pill-clear:hover { opacity: 1; }
+.accounts-table__era-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  min-width: 180px;
+  padding: 0.25rem 0;
+  margin-top: 0.25rem;
+}
+.accounts-table__era-dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.accounts-table__era-dropdown-item:hover {
+  background: var(--border);
+}
+.accounts-table__era-dropdown-item--selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+.accounts-table__era-dropdown-dates {
+  color: var(--text-3);
+  font-size: 0.8rem;
+}
+.accounts-table__era-dropdown-empty {
+  padding: 0.4rem 0.75rem;
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+.accounts-table__era-dropdown-sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.25rem 0;
+}
+.accounts-table__era-dropdown-manage {
+  font-style: italic;
+}

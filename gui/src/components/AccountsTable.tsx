@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import type { AccountSummary } from "../types";
+import { useState, useEffect, useRef, type ReactNode } from "react";
+import type { AccountSummary, EraSummary } from "../types";
 import {
   getVaultListColumnOrder,
   getVaultListPrimary,
@@ -19,6 +19,10 @@ interface AccountsTableProps {
   onLockedError: () => void;
   selectedIds: Set<number>;
   onSelectedIdsChange: (ids: Set<number>) => void;
+  eras?: EraSummary[];
+  selectedEraId?: number | null;
+  onEraChange?: (id: number | null) => void;
+  onNavigateToSettingsEras?: () => void;
 }
 
 interface ColumnDef {
@@ -78,11 +82,30 @@ export default function AccountsTable({
   onLockedError: _onLockedError,
   selectedIds,
   onSelectedIdsChange,
+  eras = [],
+  selectedEraId = null,
+  onEraChange = () => {},
+  onNavigateToSettingsEras = () => {},
 }: AccountsTableProps) {
   const [primary, setPrimary] = useState<PrimaryIdentity>(getVaultListPrimary());
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(getVaultListColumnOrder());
   const [draggedColumn, setDraggedColumn] = useState<ColumnId | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<ColumnId | null>(null);
+  const [eraDropdownOpen, setEraDropdownOpen] = useState(false);
+  const eraDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!eraDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!eraDropdownRef.current?.contains(e.target as Node)) {
+        setEraDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [eraDropdownOpen]);
+
+  const selectedEra = eras.find((e) => e.id === selectedEraId) ?? null;
 
   const COLUMNS: Record<ColumnId, ColumnDef> = {
     site: {
@@ -164,9 +187,61 @@ export default function AccountsTable({
         <button className="accounts-table__pill" disabled title="Coming later">
           Categories
         </button>
-        <button className="accounts-table__pill" disabled title="Coming later">
-          Eras
-        </button>
+        <div className="accounts-table__pill-wrapper" ref={eraDropdownRef}>
+          <button
+            className={`accounts-table__pill ${selectedEraId !== null ? "accounts-table__pill--filter-active" : ""}`}
+            onClick={() => setEraDropdownOpen((v) => !v)}
+          >
+            {selectedEra ? `Era: ${selectedEra.name}` : "Eras"}
+            {selectedEraId !== null && (
+              <span
+                className="accounts-table__pill-clear"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEraChange(null);
+                }}
+                role="button"
+                aria-label="Clear era filter"
+              >
+                {" \xd7"}
+              </span>
+            )}
+          </button>
+          {eraDropdownOpen && (
+            <div className="accounts-table__era-dropdown">
+              <button
+                className="accounts-table__era-dropdown-item"
+                onClick={() => { onEraChange(null); setEraDropdownOpen(false); }}
+              >
+                All
+              </button>
+              {eras.map((e) => (
+                <button
+                  key={e.id}
+                  className={`accounts-table__era-dropdown-item ${e.id === selectedEraId ? "accounts-table__era-dropdown-item--selected" : ""}`}
+                  onClick={() => { onEraChange(e.id); setEraDropdownOpen(false); }}
+                >
+                  {e.name}
+                  {e.start_date && e.end_date && (
+                    <span className="accounts-table__era-dropdown-dates">
+                      {" "}({e.start_date.slice(0, 4)}-{e.end_date.slice(0, 4)})
+                    </span>
+                  )}
+                </button>
+              ))}
+              {eras.length === 0 && (
+                <div className="accounts-table__era-dropdown-empty">No eras defined.</div>
+              )}
+              <hr className="accounts-table__era-dropdown-sep" />
+              <button
+                className="accounts-table__era-dropdown-item accounts-table__era-dropdown-manage"
+                onClick={() => { onNavigateToSettingsEras(); setEraDropdownOpen(false); }}
+              >
+                Manage eras…
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       <div className="accounts-table__body">
         <table>
