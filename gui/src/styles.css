@@ -2095,3 +2095,67 @@ select option {
 .accounts-table__era-dropdown-manage {
   font-style: italic;
 }
+
+/* SkippedRowsPanel */
+.skipped-rows-panel {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--bg-1);
+}
+.skipped-rows-panel__title {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.skipped-rows-panel__bulk {
+  margin-bottom: 0.4rem;
+}
+.skipped-rows-panel__bulk label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.skipped-rows-panel__bulk input {
+  flex: 1;
+  min-width: 200px;
+}
+.skipped-rows-panel__table {
+  width: 100%;
+  margin-top: 0.5rem;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.skipped-rows-panel__table th,
+.skipped-rows-panel__table td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.skipped-rows-panel__raw {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+.skipped-rows-panel__fix {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.skipped-rows-panel__fix label {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+.skipped-rows-panel__fix input {
+  flex: 1;
+  min-width: 100px;
+}
