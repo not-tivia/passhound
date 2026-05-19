@@ -81,13 +81,35 @@ export interface SampleRow {
   notes: string | null;
 }
 
+export interface PreviewPartial {
+  site: string | null;
+  url: string | null;
+  username: string | null;
+  display_name: string | null;
+  has_password: boolean;
+  notes: string | null;
+}
+
+export interface PreviewDiagnostic {
+  row: number;
+  raw: string;
+  reason: string;
+  parsed: PreviewPartial;
+}
+
+export interface RowPatch {
+  row: number;
+  site: string | null;
+  password: string | null;
+}
+
 export interface PreviewResult {
   headers: string[];
   detected_mapping: Mapping;
   effective_mapping: Mapping;
   counts: PreviewCounts;
   sample_rows: SampleRow[];
-  diagnostics: string[];
+  diagnostics: PreviewDiagnostic[];
 }
 
 export interface CommitResult {

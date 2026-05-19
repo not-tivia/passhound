@@ -10,6 +10,7 @@ import type {
   Mapping,
   PreviewResult,
   CommitResult,
+  RowPatch,
   SiteSummary,
   TagSummary,
   TagWithCount,
@@ -59,26 +60,32 @@ export const api = {
   pickAndImportCsvDryRun: (
     siteOverride: string | null,
     mapping: Mapping | null,
+    patches: RowPatch[] = [],
   ) =>
     call<PreviewResult | null>("pick_and_import_csv_dry_run", {
       siteOverride,
       mapping,
+      patches,
     }),
   importCsvDryRunWithPending: (
     siteOverride: string | null,
     mapping: Mapping | null,
+    patches: RowPatch[] = [],
   ) =>
     call<PreviewResult>("import_csv_dry_run_with_pending", {
       siteOverride,
       mapping,
+      patches,
     }),
   importCsvCommitPending: (
     siteOverride: string | null,
     mapping: Mapping | null,
+    patches: RowPatch[] = [],
   ) =>
     call<CommitResult>("import_csv_commit_pending", {
       siteOverride,
       mapping,
+      patches,
     }),
   cancelPendingImport: () => call<void>("cancel_pending_import"),
 

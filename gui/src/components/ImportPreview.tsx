@@ -54,7 +54,7 @@ export default function ImportPreview({ result }: ImportPreviewProps) {
           <div className="import-preview__diag-label">Skipped:</div>
           <ul>
             {diagnostics.slice(0, 5).map((d, i) => (
-              <li key={i}>{d}</li>
+              <li key={i}>{d.reason}</li>
             ))}
             {diagnostics.length > 5 && (
               <li className="muted">…and {diagnostics.length - 5} more</li>
