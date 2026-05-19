@@ -160,7 +160,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
             placeholder="(optional — use only for per-site CSVs)"
             value={siteOverride}
             onChange={(e) => setSiteOverride(e.target.value)}
-            disabled={!hasPending || submitting}
+            disabled={submitting}
           />
         </div>
 
