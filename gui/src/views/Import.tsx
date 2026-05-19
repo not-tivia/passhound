@@ -98,7 +98,12 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
       // can recover by typing into "Apply site to all rows" or adjusting
       // the mapping — the debounced effect will re-run dry-run-with-pending.
       setHasPending(true);
-      setError(err.message ?? `dialog: ${err.kind}`);
+      const raw = err.message ?? err.kind;
+      // Friendlier wording for the most common recoverable error.
+      const msg = raw.includes("no site column")
+        ? "CSV has no site column. Type a site name in \"Apply site to all rows\" above to apply to every row."
+        : raw;
+      setError(msg);
     }
   };
 

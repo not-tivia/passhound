@@ -41,17 +41,20 @@ pub struct Mapping {
 }
 
 const SITE_SYNONYMS: &[&str] = &[
-    "name", "site", "site_name", "website", "title", "service",
+    "name", "site", "site_name", "sites", "website", "websites",
+    "title", "service",
 ];
-const URL_SYNONYMS: &[&str] = &["url", "login_url", "web_address", "link"];
+const URL_SYNONYMS: &[&str] = &["url", "urls", "login_url", "web_address", "link", "links"];
 const USERNAME_SYNONYMS: &[&str] = &[
-    "username", "login", "user", "email", "account login",
-    "account_login", "account email", "account_email", "user name",
-    "user_name", "account name", "account_name",
+    "username", "usernames", "login", "logins", "user", "users",
+    "email", "emails", "account login", "account_login",
+    "account email", "account_email", "user name", "user_name",
+    "account name", "account_name",
 ];
 const PASSWORD_SYNONYMS: &[&str] = &[
-    "password", "pass", "pwd", "passwd", "account password",
-    "account_password", "master password", "master_password",
+    "password", "passwords", "pass", "pwd", "passwd",
+    "account password", "account_password",
+    "master password", "master_password",
 ];
 const NOTES_SYNONYMS: &[&str] = &[
     "note", "notes", "comment", "comments", "description", "remarks",
