@@ -1333,6 +1333,7 @@ pub struct EraSummary {
     pub name: String,
     pub start_date: Option<String>,
     pub end_date: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[tauri::command]
@@ -1439,6 +1440,76 @@ pub fn copy_candidate_inner(
     Ok(())
 }
 
+#[derive(serde::Deserialize, Debug)]
+pub struct EraFormArgs {
+    pub name: String,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub notes: Option<String>,
+}
+
+fn parse_era_form(args: EraFormArgs) -> Result<
+    (String, Option<chrono::NaiveDate>, Option<chrono::NaiveDate>, Option<String>),
+    GuiError,
+> {
+    let start = args.start_date
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+        .transpose()
+        .map_err(|e| GuiError::InvalidInput(format!("start_date: {e}")))?;
+    let end = args.end_date
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+        .transpose()
+        .map_err(|e| GuiError::InvalidInput(format!("end_date: {e}")))?;
+    if let (Some(s), Some(e)) = (start, end) {
+        if e < s {
+            return Err(GuiError::InvalidInput("end_date must be on or after start_date".into()));
+        }
+    }
+    Ok((args.name, start, end, args.notes))
+}
+
+#[tauri::command]
+pub fn add_era(state: State<'_, VaultState>, args: EraFormArgs) -> Result<i64, GuiError> {
+    add_era_inner(&state, args)
+}
+
+pub fn add_era_inner(state: &VaultState, args: EraFormArgs) -> Result<i64, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let (name, start, end, notes) = parse_era_form(args)?;
+    let id = passhound_core::repo::eras::add(v, &name, start, end, notes.as_deref())?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn update_era(state: State<'_, VaultState>, id: i64, args: EraFormArgs) -> Result<(), GuiError> {
+    update_era_inner(&state, id, args)
+}
+
+pub fn update_era_inner(state: &VaultState, id: i64, args: EraFormArgs) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let (name, start, end, notes) = parse_era_form(args)?;
+    passhound_core::repo::eras::update(v, id, &name, start, end, notes.as_deref())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_era(state: State<'_, VaultState>, id: i64) -> Result<(), GuiError> {
+    delete_era_inner(&state, id)
+}
+
+pub fn delete_era_inner(state: &VaultState, id: i64) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::eras::delete(v, id)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_eras(state: State<'_, VaultState>) -> Result<Vec<EraSummary>, GuiError> {
     list_eras_inner(&state)
@@ -1455,6 +1526,7 @@ pub fn list_eras_inner(state: &VaultState) -> Result<Vec<EraSummary>, GuiError> 
             name: e.name,
             start_date: e.start_date.map(|d| d.format("%Y-%m-%d").to_string()),
             end_date: e.end_date.map(|d| d.format("%Y-%m-%d").to_string()),
+            notes: e.notes,
         })
         .collect())
 }
@@ -2676,6 +2748,104 @@ mod tests {
         assert_eq!(eras[0].name, "RuneScape years");
         assert_eq!(eras[0].start_date.as_deref(), Some("2010-01-01"));
         assert_eq!(eras[0].end_date.as_deref(), Some("2015-12-31"));
+    }
+
+    #[test]
+    fn add_era_round_trip_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        let id = add_era_inner(
+            &state,
+            EraFormArgs {
+                name: "College".into(),
+                start_date: Some("2016-01-01".into()),
+                end_date: Some("2020-05-15".into()),
+                notes: Some("ucla".into()),
+            },
+        ).unwrap();
+
+        let eras = list_eras_inner(&state).unwrap();
+        assert_eq!(eras.len(), 1);
+        assert_eq!(eras[0].id, id);
+        assert_eq!(eras[0].name, "College");
+        assert_eq!(eras[0].start_date.as_deref(), Some("2016-01-01"));
+        assert_eq!(eras[0].end_date.as_deref(), Some("2020-05-15"));
+        assert_eq!(eras[0].notes.as_deref(), Some("ucla"));
+    }
+
+    #[test]
+    fn update_era_round_trip() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let id = add_era_inner(
+            &state,
+            EraFormArgs {
+                name: "Old".into(),
+                start_date: None,
+                end_date: None,
+                notes: None,
+            },
+        ).unwrap();
+        update_era_inner(
+            &state,
+            id,
+            EraFormArgs {
+                name: "New".into(),
+                start_date: Some("2024-01-01".into()),
+                end_date: Some("2024-12-31".into()),
+                notes: Some("note".into()),
+            },
+        ).unwrap();
+        let eras = list_eras_inner(&state).unwrap();
+        assert_eq!(eras.len(), 1);
+        assert_eq!(eras[0].name, "New");
+        assert_eq!(eras[0].start_date.as_deref(), Some("2024-01-01"));
+        assert_eq!(eras[0].notes.as_deref(), Some("note"));
+    }
+
+    #[test]
+    fn update_era_errors_on_invalid_date_range() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let id = add_era_inner(
+            &state,
+            EraFormArgs { name: "X".into(), start_date: None, end_date: None, notes: None },
+        ).unwrap();
+        let err = update_era_inner(
+            &state,
+            id,
+            EraFormArgs {
+                name: "X".into(),
+                start_date: Some("2024-12-01".into()),
+                end_date: Some("2024-01-01".into()),
+                notes: None,
+            },
+        ).unwrap_err();
+        assert!(matches!(err, GuiError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn delete_era_returns_not_found_after_first_delete() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+        let id = add_era_inner(
+            &state,
+            EraFormArgs { name: "Tmp".into(), start_date: None, end_date: None, notes: None },
+        ).unwrap();
+        delete_era_inner(&state, id).unwrap();
+        // Second delete should surface a NotFound-style error from the repo layer.
+        let err = delete_era_inner(&state, id).unwrap_err();
+        // Loose check: error string contains "not" and "found".
+        let dbg = format!("{err:?}").to_lowercase();
+        assert!(
+            dbg.contains("not") && dbg.contains("found"),
+            "expected not-found-style error, got {err:?}"
+        );
     }
 
     #[test]
