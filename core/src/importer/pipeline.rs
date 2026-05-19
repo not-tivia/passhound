@@ -130,38 +130,73 @@ pub fn commit(
         match item.classification {
             Classification::DuplicateOfTriple => continue,
             Classification::New => {
+                // Re-check site by name inside the transaction. Preview's
+                // matched_site_id was a snapshot taken before the batch ran,
+                // so earlier entries in this same CSV may have just created
+                // the same site. Without this check we'd create duplicate
+                // sites for CSVs that have multiple rows per logical site.
                 let site_id = match item.matched_site_id {
                     Some(id) => id,
-                    None => {
-                        let s = sites::create(
-                            vault,
-                            NewSite {
-                                name: item.entry.site.clone(),
-                                url: item.entry.url.clone(),
-                                category: None,
-                                abbreviations: vec![],
-                                notes: None,
-                            },
-                        )?;
-                        s.id
-                    }
+                    None => match sites::find_by_name(vault, &item.entry.site)? {
+                        Some(s) => s.id,
+                        None => {
+                            let s = sites::create(
+                                vault,
+                                NewSite {
+                                    name: item.entry.site.clone(),
+                                    url: item.entry.url.clone(),
+                                    category: None,
+                                    abbreviations: vec![],
+                                    notes: None,
+                                },
+                            )?;
+                            s.id
+                        }
+                    },
                 };
+                // Re-check account by (site_id, username) for the same reason.
+                // If a prior entry in this batch already created the account,
+                // we treat this row as a merge: retire current, insert new.
+                let mut treat_as_merge = false;
                 let account_id = match item.matched_account_id {
                     Some(id) => id,
                     None => {
-                        let a = accounts::create(
-                            vault,
-                            NewAccount {
-                                site_id,
-                                username: item.entry.username.clone(),
-                                display_name: item.entry.display_name.clone(),
-                                alias: None,
-                                notes: None,
-                            },
-                        )?;
-                        a.id
+                        let accs = accounts::list_for_site(vault, site_id, &[])?;
+                        let target_user = item.entry.username.as_deref().unwrap_or("");
+                        let existing = accs.iter().find(|a| {
+                            a.username.as_deref().unwrap_or("") == target_user
+                        });
+                        match existing {
+                            Some(a) => {
+                                treat_as_merge = true;
+                                a.id
+                            }
+                            None => {
+                                let a = accounts::create(
+                                    vault,
+                                    NewAccount {
+                                        site_id,
+                                        username: item.entry.username.clone(),
+                                        display_name: item.entry.display_name.clone(),
+                                        alias: None,
+                                        notes: None,
+                                    },
+                                )?;
+                                a.id
+                            }
+                        }
                     }
                 };
+                if treat_as_merge {
+                    // Earlier in this batch we created this account. Retire
+                    // its current password before inserting the new one — same
+                    // semantics as the Merge classification path below.
+                    tx.execute(
+                        "UPDATE password_history SET retired_at = ?1
+                         WHERE account_id = ?2 AND retired_at IS NULL",
+                        params![now.to_rfc3339(), account_id],
+                    )?;
+                }
                 insert_password_with_provenance(
                     &tx,
                     vault,

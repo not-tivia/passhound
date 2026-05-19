@@ -291,6 +291,7 @@ select option {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: fixed;
 }
 
 .accounts-table th {
@@ -311,6 +312,9 @@ select option {
   padding: 6px 10px;
   border-bottom: 1px solid #181820;
   color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .accounts-table tr {
