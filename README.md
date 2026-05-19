@@ -1,12 +1,22 @@
 # PassHound
 
-A local, encrypted, offline personal password vault and recovery tool.
+A local, encrypted, offline personal password vault and recovery tool. Argon2id KDF + XChaCha20-Poly1305 AEAD. Rust core, Tauri/React desktop GUI, CLI binary. See [SECURITY.md](SECURITY.md) for the threat model.
 
-**Phase 1 (this build):** CLI with `init` / `add` / `list` / `get`. Foundational vault and encryption.
+## Download
 
-Subsequent phases will add: bulk importers (Phase 2), a recovery generator that produces ranked candidates from your historical patterns (Phase 3), and a Tauri desktop GUI (Phase 4).
+Latest release: **[v1.4.0](https://github.com/not-tivia/passhound/releases/latest)**
 
-## Quick start
+| File | Platform |
+|---|---|
+| `PassHound_1.4.0_x64_en-US.msi` | Windows (MSI installer) |
+| `PassHound_1.4.0_x64-setup.exe` | Windows (NSIS installer) |
+| `PassHound_1.4.0_amd64.deb` | Linux Debian/Ubuntu |
+| `PassHound-1.4.0-1.x86_64.rpm` | Linux Fedora/RHEL |
+| `PassHound_1.4.0_amd64.AppImage` | Linux portable |
+
+Source tarball and the CLI binary can be built locally — see Quick start below.
+
+## CLI quick start
 
 ```bash
 # Build
