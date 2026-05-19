@@ -1989,3 +1989,36 @@ select option {
 .modal--add-base-word {
   min-width: 320px;
 }
+
+/* ============================================================================
+   Phase 4.17 Task 5 — Settings ERAS section
+   ============================================================================ */
+
+.settings-eras { display: flex; flex-direction: column; gap: 0.5rem; }
+.settings-eras__empty {
+  font-style: italic;
+  color: var(--text-2);
+  margin: 0;
+}
+.settings-eras__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.settings-eras__table th,
+.settings-eras__table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+}
+.settings-eras__table th { font-weight: 600; color: var(--text-1); }
+.settings-eras__table tbody tr + tr td {
+  border-top: 1px solid var(--border);
+}
+.settings-eras__actions { display: flex; gap: 0.25rem; }
+.settings-eras__actions button { padding: 0.2rem 0.5rem; font-size: 0.85rem; }
+.settings-eras__delete { color: var(--error); }
+.settings-eras__add {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.8rem;
+}
