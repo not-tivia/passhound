@@ -6,7 +6,7 @@
 //! 3. Auto-detect from synonym table.
 //! 4. `Err(Error::NeedsColumnMapping)` if auto-detect fails.
 
-use super::{ImportEntry, ParseDiagnostic, ParseResult};
+use super::{ImportEntry, ParseDiagnostic, ParseResult, PartialEntry};
 use crate::error::{Error, Result};
 use crate::vault::Vault;
 use zeroize::Zeroizing;
@@ -232,6 +232,7 @@ pub fn parse_file(
                     row: row_num,
                     raw: String::new(),
                     reason: format!("csv parse: {e}"),
+                    parsed: PartialEntry::default(),
                 });
                 continue;
             }
@@ -240,6 +241,25 @@ pub fn parse_file(
             .map(|(i, field)| if i == map.password { "<redacted>" } else { field })
             .collect::<Vec<_>>()
             .join(",");
+
+        // Build the partial entry from available fields before the missingness
+        // checks, so diagnostics can carry what was successfully parsed.
+        let partial = PartialEntry {
+            site: map.site.and_then(|i| rec.get(i)).map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            url: map.url.and_then(|i| rec.get(i)).map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            username: map.username.and_then(|i| rec.get(i)).map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            display_name: map.display_name.and_then(|i| rec.get(i)).map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            password: rec.get(map.password).map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+                .map(Zeroizing::new),
+            notes: None, // assembled below after extras; left None in partial
+            created_at: None, // CSV parser leaves created_at None in partial
+            source_row: Some(raw.clone()),
+        };
 
         let site = if let Some(name) = &site_override {
             name.clone()
@@ -254,6 +274,7 @@ pub fn parse_file(
                         row: row_num,
                         raw,
                         reason: "missing site".to_string(),
+                        parsed: partial,
                     });
                     continue;
                 }
@@ -266,6 +287,7 @@ pub fn parse_file(
                     row: row_num,
                     raw,
                     reason: "missing password".to_string(),
+                    parsed: partial,
                 });
                 continue;
             }

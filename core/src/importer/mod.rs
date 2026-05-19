@@ -36,12 +36,38 @@ pub struct ImportEntry {
     pub source_row: Option<String>,
 }
 
+/// What the parser successfully extracted from a row that ended up as a
+/// diagnostic. The missing field(s) are None; everything else reflects
+/// what was found. Used by `pipeline::apply_patches` to reconstruct a
+/// full ImportEntry when the user supplies the missing value.
+#[derive(Debug, Clone, Default)]
+pub struct PartialEntry {
+    pub site: Option<String>,
+    pub url: Option<String>,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub password: Option<Zeroizing<String>>,
+    pub notes: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub source_row: Option<String>,
+}
+
+/// User-supplied fill-in values for a previously-skipped row.
+/// Constructed by the GUI layer from RowPatchArgs IPC payloads.
+#[derive(Debug, Clone)]
+pub struct RowPatch {
+    pub row: usize,
+    pub site: Option<String>,
+    pub password: Option<String>,
+}
+
 /// A row the parser couldn't interpret.
 #[derive(Debug, Clone)]
 pub struct ParseDiagnostic {
     pub row: usize,
     pub raw: String,
     pub reason: String,
+    pub parsed: PartialEntry,
 }
 
 /// Output of a parser: successful entries plus rows it skipped.

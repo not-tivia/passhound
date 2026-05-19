@@ -5,7 +5,7 @@
 //! password / notes. A block missing both `site:` and `url:`, or missing
 //! `password:`, becomes a `ParseDiagnostic`.
 
-use super::{ImportEntry, ParseDiagnostic, ParseResult};
+use super::{ImportEntry, ParseDiagnostic, ParseResult, PartialEntry};
 use zeroize::Zeroizing;
 
 /// Parse the input string into entries and diagnostics.
@@ -184,6 +184,21 @@ fn process_block(lines: &[&str], start_row: usize, result: &mut ParseResult) {
         }
     }
 
+    // Build a partial entry from the block's accumulated fields before the
+    // missingness checks, so diagnostics carry what was successfully parsed.
+    let partial = PartialEntry {
+        site: site.clone().filter(|s| !s.is_empty()),
+        url: url.clone().filter(|s| !s.is_empty()),
+        username: username.clone().filter(|s| !s.is_empty()),
+        display_name: None, // paste parser doesn't have a display_name field
+        password: password.clone()
+            .filter(|s| !s.is_empty())
+            .map(Zeroizing::new),
+        notes: notes.clone().filter(|s| !s.is_empty()),
+        created_at: None,
+        source_row: Some(raw.clone()),
+    };
+
     let final_site = match site {
         Some(s) if !s.is_empty() => s,
         _ => {
@@ -191,6 +206,7 @@ fn process_block(lines: &[&str], start_row: usize, result: &mut ParseResult) {
                 row: start_row,
                 raw,
                 reason: "block missing site/url".to_string(),
+                parsed: partial,
             });
             return;
         }
@@ -202,6 +218,7 @@ fn process_block(lines: &[&str], start_row: usize, result: &mut ParseResult) {
                 row: start_row,
                 raw,
                 reason: "block missing password".to_string(),
+                parsed: partial,
             });
             return;
         }
