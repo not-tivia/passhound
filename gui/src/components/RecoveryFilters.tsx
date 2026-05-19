@@ -34,7 +34,7 @@ export default function RecoveryFilters({
     api.listEras().then(setEras, (e) => {
       if ((e as GuiError).kind === "Locked") onLockedError();
     });
-    api.listAccounts().then(setAccounts, (e) => {
+    api.listAccounts(null, null, null).then(setAccounts, (e) => {
       if ((e as GuiError).kind === "Locked") onLockedError();
     });
   }, [onLockedError]);

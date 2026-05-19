@@ -19,10 +19,10 @@ interface AccountsTableProps {
   onLockedError: () => void;
   selectedIds: Set<number>;
   onSelectedIdsChange: (ids: Set<number>) => void;
-  eras?: EraSummary[];
-  selectedEraId?: number | null;
-  onEraChange?: (id: number | null) => void;
-  onNavigateToSettingsEras?: () => void;
+  eras: EraSummary[];
+  selectedEraId: number | null;
+  onEraChange: (id: number | null) => void;
+  onNavigateToSettingsEras: () => void;
 }
 
 interface ColumnDef {
@@ -82,10 +82,10 @@ export default function AccountsTable({
   onLockedError: _onLockedError,
   selectedIds,
   onSelectedIdsChange,
-  eras = [],
-  selectedEraId = null,
-  onEraChange = () => {},
-  onNavigateToSettingsEras = () => {},
+  eras,
+  selectedEraId,
+  onEraChange,
+  onNavigateToSettingsEras,
 }: AccountsTableProps) {
   const [primary, setPrimary] = useState<PrimaryIdentity>(getVaultListPrimary());
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(getVaultListColumnOrder());

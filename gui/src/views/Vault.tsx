@@ -12,7 +12,7 @@ import BaseWords from "./BaseWords";
 import Settings from "./Settings";
 import { ToastProvider } from "../components/Toast";
 import { api } from "../api";
-import type { AccountSummary, GuiError } from "../types";
+import type { AccountSummary, EraSummary, GuiError } from "../types";
 
 interface VaultProps {
   onLock: () => void;
@@ -36,23 +36,34 @@ export default function Vault({ onLock }: VaultProps) {
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [search, setSearch] = useState("");
 
+  const [selectedEraId, setSelectedEraId] = useState<number | null>(null);
+  const [eras, setEras] = useState<EraSummary[]>([]);
+
+  // Re-fetch eras whenever the user returns to the list view so any edits made
+  // in Settings are reflected immediately.
+  useEffect(() => {
+    if (view === "list") {
+      api.listEras().then(setEras).catch(() => setEras([]));
+    }
+  }, [view]);
+
   // Clear row-level selection whenever the tag filter changes (selected rows may
   // no longer be visible after the filter is applied).
   useEffect(() => { setSelectedIds(new Set()); }, [filterTagIds]);
 
   // Immediate (non-debounced) reload on filter or refreshKey change.
   useEffect(() => {
-    api.listAccounts(search || undefined, filterTagIds.length > 0 ? filterTagIds : undefined).then(
+    api.listAccounts(search || null, filterTagIds.length > 0 ? filterTagIds : null, selectedEraId).then(
       setAccounts,
       (e) => { if ((e as GuiError).kind === "Locked") onLock(); }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, filterTagIds, onLock]);
+  }, [refreshKey, filterTagIds, selectedEraId, onLock]);
 
   // Debounced reload on search-text change.
   useEffect(() => {
     const t = setTimeout(() => {
-      api.listAccounts(search || undefined, filterTagIds.length > 0 ? filterTagIds : undefined).then(
+      api.listAccounts(search || null, filterTagIds.length > 0 ? filterTagIds : null, selectedEraId).then(
         setAccounts,
         (e) => { if ((e as GuiError).kind === "Locked") onLock(); }
       );
@@ -98,6 +109,10 @@ export default function Vault({ onLock }: VaultProps) {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onLockedError={onLock}
+                eras={eras}
+                selectedEraId={selectedEraId}
+                onEraChange={setSelectedEraId}
+                onNavigateToSettingsEras={() => setView("settings")}
               />
               <BulkActionBar
                 selectedIds={selectedIds}

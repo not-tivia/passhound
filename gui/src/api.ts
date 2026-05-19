@@ -44,8 +44,12 @@ export const api = {
   vaultCreate: (masterPw: string) => call<void>("vault_create", { masterPw }),
   vaultUnlock: (masterPw: string) => call<void>("vault_unlock", { masterPw }),
   vaultLock: () => call<void>("vault_lock"),
-  listAccounts: (filter?: string, tagIds?: number[]) =>
-    call<AccountSummary[]>("list_accounts", { filter: filter || null, tagIds: tagIds ?? null }),
+  listAccounts: (
+    filter: string | null,
+    tagIds: number[] | null,
+    eraId: number | null,
+  ) =>
+    call<AccountSummary[]>("list_accounts", { filter, tagIds, eraId }),
   getAccount: (id: number) => call<AccountDetail>("get_account", { id }),
   revealPassword: (historyId: number) =>
     call<string>("reveal_password", { historyId }),
