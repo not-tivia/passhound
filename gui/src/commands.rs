@@ -509,6 +509,61 @@ impl From<passhound_core::importer::csv::Mapping> for MappingArgs {
     }
 }
 
+/// IPC-side mirror of `passhound_core::importer::RowPatch`. Frontend
+/// sends one per skipped row the user wants to patch.
+#[derive(serde::Deserialize, Debug, Clone)]
+pub struct RowPatchArgs {
+    pub row: usize,
+    pub site: Option<String>,
+    pub password: Option<String>,
+}
+
+impl From<RowPatchArgs> for passhound_core::importer::RowPatch {
+    fn from(a: RowPatchArgs) -> Self {
+        passhound_core::importer::RowPatch {
+            row: a.row,
+            site: a.site,
+            password: a.password,
+        }
+    }
+}
+
+/// Serializable subset of `passhound_core::importer::PartialEntry`.
+/// Omits the plaintext password (the frontend doesn't need to SEE it
+/// for patching — only knowing whether it exists) per Phase 4.16 M-2
+/// minimization principle.
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct PreviewPartial {
+    pub site: Option<String>,
+    pub url: Option<String>,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub has_password: bool,
+    pub notes: Option<String>,
+}
+
+impl From<&passhound_core::importer::PartialEntry> for PreviewPartial {
+    fn from(p: &passhound_core::importer::PartialEntry) -> Self {
+        Self {
+            site: p.site.clone(),
+            url: p.url.clone(),
+            username: p.username.clone(),
+            display_name: p.display_name.clone(),
+            has_password: p.password.is_some(),
+            notes: p.notes.clone(),
+        }
+    }
+}
+
+/// Structured diagnostic for the frontend's SkippedRowsPanel.
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct PreviewDiagnostic {
+    pub row: usize,
+    pub raw: String,
+    pub reason: String,
+    pub parsed: PreviewPartial,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PreviewCounts {
     pub new: usize,
@@ -533,7 +588,7 @@ pub struct PreviewResult {
     pub effective_mapping: MappingArgs,
     pub counts: PreviewCounts,
     pub sample_rows: Vec<SampleRow>,
-    pub diagnostics: Vec<String>,
+    pub diagnostics: Vec<PreviewDiagnostic>,
 }
 
 #[derive(Debug, Serialize)]
@@ -549,6 +604,7 @@ pub fn import_csv_dry_run_inner(
     path: &std::path::Path,
     site_override: Option<String>,
     mapping: Option<MappingArgs>,
+    patches: Vec<passhound_core::importer::RowPatch>,
 ) -> Result<PreviewResult, GuiError> {
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
@@ -572,6 +628,7 @@ pub fn import_csv_dry_run_inner(
         Some(effective.clone()),
         site_override,
     )?;
+    let parse = passhound_core::importer::pipeline::apply_patches(parse, &patches);
 
     let preview = passhound_core::importer::pipeline::preview(v, parse.entries.clone())?;
 
@@ -596,10 +653,15 @@ pub fn import_csv_dry_run_inner(
         })
         .collect();
 
-    let diagnostics: Vec<String> = parse
+    let diagnostics: Vec<PreviewDiagnostic> = parse
         .diagnostics
         .iter()
-        .map(|d| format!("row {}: {}", d.row, d.reason))
+        .map(|d| PreviewDiagnostic {
+            row: d.row,
+            raw: d.raw.clone(),
+            reason: d.reason.clone(),
+            parsed: (&d.parsed).into(),
+        })
         .collect();
 
     Ok(PreviewResult {
@@ -617,6 +679,7 @@ pub fn import_csv_commit_inner(
     path: &std::path::Path,
     site_override: Option<String>,
     mapping: Option<MappingArgs>,
+    patches: Vec<passhound_core::importer::RowPatch>,
 ) -> Result<CommitResult, GuiError> {
     let guard = state.vault.lock().map_err(poisoned)?;
     let v = guard.as_ref().ok_or(GuiError::Locked)?;
@@ -637,6 +700,7 @@ pub fn import_csv_commit_inner(
         Some(effective),
         site_override,
     )?;
+    let parse = passhound_core::importer::pipeline::apply_patches(parse, &patches);
     let preview = passhound_core::importer::pipeline::preview(v, parse.entries.clone())?;
 
     let counts = PreviewCounts {
@@ -665,6 +729,7 @@ pub async fn pick_and_import_csv_dry_run(
     state: State<'_, VaultState>,
     site_override: Option<String>,
     mapping: Option<MappingArgs>,
+    patches: Vec<RowPatchArgs>,
 ) -> Result<Option<PreviewResult>, GuiError> {
     use tauri_plugin_dialog::DialogExt;
 
@@ -685,7 +750,9 @@ pub async fn pick_and_import_csv_dry_run(
         *slot = Some(pb.clone());
     }
 
-    let preview = import_csv_dry_run_inner(&state, &pb, site_override, mapping)?;
+    let core_patches: Vec<passhound_core::importer::RowPatch> =
+        patches.into_iter().map(Into::into).collect();
+    let preview = import_csv_dry_run_inner(&state, &pb, site_override, mapping, core_patches)?;
     Ok(Some(preview))
 }
 
@@ -694,20 +761,22 @@ pub fn import_csv_commit_pending(
     state: State<'_, VaultState>,
     site_override: Option<String>,
     mapping: Option<MappingArgs>,
+    patches: Vec<RowPatchArgs>,
 ) -> Result<CommitResult, GuiError> {
-    import_csv_commit_pending_inner(&state, site_override, mapping)
+    import_csv_commit_pending_inner(&state, site_override, mapping, patches.into_iter().map(Into::into).collect())
 }
 
 pub fn import_csv_commit_pending_inner(
     state: &VaultState,
     site_override: Option<String>,
     mapping: Option<MappingArgs>,
+    patches: Vec<passhound_core::importer::RowPatch>,
 ) -> Result<CommitResult, GuiError> {
     let path = {
         let mut slot = state.pending_import_path.lock().map_err(poisoned)?;
         slot.take().ok_or(GuiError::NoPendingImport)?
     };
-    import_csv_commit_inner(state, &path, site_override, mapping)
+    import_csv_commit_inner(state, &path, site_override, mapping, patches)
 }
 
 #[tauri::command]
@@ -730,20 +799,22 @@ pub fn import_csv_dry_run_with_pending(
     state: State<'_, VaultState>,
     site_override: Option<String>,
     mapping: Option<MappingArgs>,
+    patches: Vec<RowPatchArgs>,
 ) -> Result<PreviewResult, GuiError> {
-    import_csv_dry_run_with_pending_inner(&state, site_override, mapping)
+    import_csv_dry_run_with_pending_inner(&state, site_override, mapping, patches.into_iter().map(Into::into).collect())
 }
 
 pub fn import_csv_dry_run_with_pending_inner(
     state: &VaultState,
     site_override: Option<String>,
     mapping: Option<MappingArgs>,
+    patches: Vec<passhound_core::importer::RowPatch>,
 ) -> Result<PreviewResult, GuiError> {
     let path = {
         let slot = state.pending_import_path.lock().map_err(poisoned)?;
         slot.clone().ok_or(GuiError::NoPendingImport)?
     };
-    import_csv_dry_run_inner(state, &path, site_override, mapping)
+    import_csv_dry_run_inner(state, &path, site_override, mapping, patches)
 }
 
 fn read_csv_headers(path: &std::path::Path) -> Result<Vec<String>, GuiError> {
@@ -2165,7 +2236,7 @@ mod tests {
         )
         .unwrap();
 
-        let preview = import_csv_dry_run_inner(&state, &csv_path, None, None).unwrap();
+        let preview = import_csv_dry_run_inner(&state, &csv_path, None, None, vec![]).unwrap();
         assert_eq!(preview.headers, vec!["name", "login", "password", "note"]);
         assert_eq!(preview.counts.new, 1);
         assert_eq!(preview.counts.duplicates, 0);
@@ -2195,7 +2266,7 @@ mod tests {
         )
         .unwrap();
 
-        let r = import_csv_commit_inner(&state, &csv_path, None, None).unwrap();
+        let r = import_csv_commit_inner(&state, &csv_path, None, None, vec![]).unwrap();
         assert_eq!(r.counts.new, 1);
         assert!(r.import_id > 0);
 
@@ -3377,7 +3448,7 @@ mod tests {
         let (_tmp, path) = temp_vault();
         let state = VaultState::new();
         vault_create_inner(&state, &path, b"pw").unwrap();
-        let err = import_csv_commit_pending_inner(&state, None, None).unwrap_err();
+        let err = import_csv_commit_pending_inner(&state, None, None, vec![]).unwrap_err();
         assert!(matches!(err, GuiError::NoPendingImport));
     }
 
@@ -3386,7 +3457,7 @@ mod tests {
         let (_tmp, path) = temp_vault();
         let state = VaultState::new();
         vault_create_inner(&state, &path, b"pw").unwrap();
-        match import_csv_dry_run_with_pending_inner(&state, None, None) {
+        match import_csv_dry_run_with_pending_inner(&state, None, None, vec![]) {
             Err(GuiError::NoPendingImport) => {}
             other => panic!("expected NoPendingImport, got {:?}", other.err()),
         }
@@ -3416,5 +3487,37 @@ mod tests {
         }
         vault_lock_inner(&state).unwrap();
         assert!(state.pending_import_path.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn import_csv_dry_run_with_patches_promotes_skipped_rows_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"pw").unwrap();
+
+        // CSV with one good row and one missing-site row.
+        let csv_text = "name,user,password\nReddit,alice,hunter2\n,bob,S3cret!\n";
+        let tmp_dir = tempfile::TempDir::new().unwrap();
+        let csv_path = tmp_dir.path().join("p.csv");
+        std::fs::write(&csv_path, csv_text).unwrap();
+
+        // No patches: row 3 (empty-site) is a diagnostic.
+        let preview = import_csv_dry_run_inner(&state, &csv_path, None, None, vec![]).unwrap();
+        assert_eq!(preview.counts.new, 1, "expected 1 successful + 1 diagnostic without patch");
+        assert_eq!(preview.diagnostics.len(), 1);
+        assert_eq!(preview.diagnostics[0].row, 3);
+        assert_eq!(preview.diagnostics[0].reason, "missing site");
+        assert!(preview.diagnostics[0].parsed.has_password);
+        assert_eq!(preview.diagnostics[0].parsed.username.as_deref(), Some("bob"));
+
+        // With a patch supplying site for row 3, both rows are entries.
+        let patches = vec![passhound_core::importer::RowPatch {
+            row: 3,
+            site: Some("Reddit".to_string()),
+            password: None,
+        }];
+        let preview2 = import_csv_dry_run_inner(&state, &csv_path, None, None, patches).unwrap();
+        assert_eq!(preview2.counts.new, 2, "patched row should be promoted to an entry");
+        assert!(preview2.diagnostics.is_empty(), "no diagnostics after patching");
     }
 }
