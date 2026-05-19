@@ -92,6 +92,12 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
         onLockedError();
         return;
       }
+      // The Tauri command stashed the path BEFORE running the dry-run, so
+      // even when the dry-run fails (e.g., "no site column found"), the
+      // path is in pending_import_path. Flip hasPending=true so the user
+      // can recover by typing into "Apply site to all rows" or adjusting
+      // the mapping — the debounced effect will re-run dry-run-with-pending.
+      setHasPending(true);
       setError(err.message ?? `dialog: ${err.kind}`);
     }
   };
