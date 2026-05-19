@@ -7,8 +7,16 @@ import ColumnMappingTable, {
   mappingToRoles,
 } from "../components/ColumnMappingTable";
 import ImportPreview from "../components/ImportPreview";
+import SkippedRowsPanel from "../components/SkippedRowsPanel";
 import { useToast } from "../components/Toast";
-import type { GuiError, PreviewResult } from "../types";
+import type { GuiError, PreviewResult, RowPatch, PreviewDiagnostic } from "../types";
+
+function isMissingSite(d: PreviewDiagnostic): boolean {
+  return !d.parsed.site || d.parsed.site.trim().length === 0;
+}
+function isMissingPassword(d: PreviewDiagnostic): boolean {
+  return !d.parsed.has_password;
+}
 
 interface ImportProps {
   onDone: () => void;
@@ -22,8 +30,35 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [bulkPatch, setBulkPatch] = useState<{ site: string; password: string }>({
+    site: "",
+    password: "",
+  });
+  const [rowPatches, setRowPatches] = useState<Map<number, { site?: string; password?: string }>>(
+    new Map(),
+  );
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toast = useToast();
+
+  const buildPatches = (): RowPatch[] => {
+    if (!preview) return [];
+    return preview.diagnostics
+      .map((d) => {
+        const row = rowPatches.get(d.row) ?? {};
+        const sitePatch = isMissingSite(d)
+          ? (row.site ?? bulkPatch.site).trim()
+          : "";
+        const passwordPatch = isMissingPassword(d)
+          ? (row.password ?? bulkPatch.password)
+          : "";
+        return {
+          row: d.row,
+          site: sitePatch || null,
+          password: passwordPatch || null,
+        };
+      })
+      .filter((p) => p.site !== null || p.password !== null);
+  };
 
   // Best-effort: clear any pending import slot if user navigates away.
   useEffect(() => {
@@ -35,6 +70,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
   const refreshPreviewWithPending = async (
     site: string | null,
     currentRoles: ColumnRole[] | null,
+    patches: RowPatch[],
   ) => {
     setError(null);
     try {
@@ -42,7 +78,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
         currentRoles && currentRoles.length > 0
           ? rolesToMapping(currentRoles)
           : null;
-      const result = await api.importCsvDryRunWithPending(site, mapping);
+      const result = await api.importCsvDryRunWithPending(site, mapping, patches);
       setPreview(result);
       // Sync roles to the effective mapping on the first preview only —
       // don't clobber the user's in-progress edits.
@@ -60,23 +96,41 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
     }
   };
 
-  // Debounced refresh when site override or roles change (after a file is picked).
+  // Debounced refresh when site override, roles, or patches change (after a file is picked).
   useEffect(() => {
     if (!hasPending) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      refreshPreviewWithPending(siteOverride || null, roles);
+      refreshPreviewWithPending(siteOverride || null, roles, buildPatches());
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPending, siteOverride, roles]);
+  }, [hasPending, siteOverride, roles, bulkPatch, rowPatches]);
+
+  // Prune stale row patches when diagnostics change (e.g. after re-parse shifts rows).
+  useEffect(() => {
+    if (!preview) return;
+    const liveRows = new Set(preview.diagnostics.map((d) => d.row));
+    setRowPatches((prev) => {
+      let changed = false;
+      const next = new Map<number, { site?: string; password?: string }>();
+      for (const [row, patch] of prev) {
+        if (liveRows.has(row)) {
+          next.set(row, patch);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [preview]);
 
   const handleBrowse = async () => {
     try {
       const mapping = roles.length > 0 ? rolesToMapping(roles) : null;
-      const result = await api.pickAndImportCsvDryRun(siteOverride || null, mapping);
+      const result = await api.pickAndImportCsvDryRun(siteOverride || null, mapping, []);
       if (result === null) {
         // User cancelled the dialog — do nothing.
         return;
@@ -121,6 +175,7 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
       const result = await api.importCsvCommitPending(
         siteOverride || null,
         mapping,
+        buildPatches(),
       );
       toast.show(`Imported ${result.counts.new} entries`);
       onDone();
@@ -189,6 +244,24 @@ export default function Import({ onDone, onLockedError }: ImportProps) {
               }}
             />
             <ImportPreview result={preview} />
+            {preview.diagnostics.length > 0 && (
+              <SkippedRowsPanel
+                diagnostics={preview.diagnostics}
+                bulkPatch={bulkPatch}
+                rowPatches={rowPatches}
+                onBulkChange={(field, value) =>
+                  setBulkPatch((prev) => ({ ...prev, [field]: value }))
+                }
+                onRowChange={(row, field, value) =>
+                  setRowPatches((prev) => {
+                    const next = new Map(prev);
+                    const current = next.get(row) ?? {};
+                    next.set(row, { ...current, [field]: value });
+                    return next;
+                  })
+                }
+              />
+            )}
           </>
         )}
 

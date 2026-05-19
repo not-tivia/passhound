@@ -5,7 +5,7 @@ interface ImportPreviewProps {
 }
 
 export default function ImportPreview({ result }: ImportPreviewProps) {
-  const { counts, sample_rows, diagnostics } = result;
+  const { counts, sample_rows } = result;
   return (
     <div className="import-preview">
       <div className="import-preview__summary">
@@ -48,19 +48,6 @@ export default function ImportPreview({ result }: ImportPreviewProps) {
             ))}
           </tbody>
         </table>
-      )}
-      {diagnostics.length > 0 && (
-        <div className="import-preview__diagnostics">
-          <div className="import-preview__diag-label">Skipped:</div>
-          <ul>
-            {diagnostics.slice(0, 5).map((d, i) => (
-              <li key={i}>{d.reason}</li>
-            ))}
-            {diagnostics.length > 5 && (
-              <li className="muted">…and {diagnostics.length - 5} more</li>
-            )}
-          </ul>
-        </div>
       )}
     </div>
   );

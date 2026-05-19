@@ -60,7 +60,7 @@ export const api = {
   pickAndImportCsvDryRun: (
     siteOverride: string | null,
     mapping: Mapping | null,
-    patches: RowPatch[] = [],
+    patches: RowPatch[],
   ) =>
     call<PreviewResult | null>("pick_and_import_csv_dry_run", {
       siteOverride,
@@ -70,7 +70,7 @@ export const api = {
   importCsvDryRunWithPending: (
     siteOverride: string | null,
     mapping: Mapping | null,
-    patches: RowPatch[] = [],
+    patches: RowPatch[],
   ) =>
     call<PreviewResult>("import_csv_dry_run_with_pending", {
       siteOverride,
@@ -80,7 +80,7 @@ export const api = {
   importCsvCommitPending: (
     siteOverride: string | null,
     mapping: Mapping | null,
-    patches: RowPatch[] = [],
+    patches: RowPatch[],
   ) =>
     call<CommitResult>("import_csv_commit_pending", {
       siteOverride,
