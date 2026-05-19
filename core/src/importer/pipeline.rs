@@ -1,6 +1,6 @@
 //! Pipeline: classify imported entries against the vault, then commit / undo.
 
-use super::{ImportEntry, ParseResult};
+use super::{ImportEntry, ParseResult, RowPatch};
 use crate::error::{Error, Result};
 use crate::repo::accounts::{self, NewAccount};
 use crate::repo::passwords;
@@ -323,6 +323,63 @@ pub fn undo(vault: &Vault, import_id: ImportId) -> Result<UndoCounts> {
     })
 }
 
+/// Stitch user-supplied patches into a ParseResult: for each diagnostic
+/// whose row appears in the patches and where the patch supplies all
+/// still-missing required fields (site + password), the diagnostic is
+/// promoted to a full ImportEntry. Whitespace-only patches and orphan
+/// patches (referencing rows not in current diagnostics) are silently
+/// dropped.
+pub fn apply_patches(
+    mut result: ParseResult,
+    patches: &[RowPatch],
+) -> ParseResult {
+    use std::collections::HashMap;
+    let patch_by_row: HashMap<usize, &RowPatch> =
+        patches.iter().map(|p| (p.row, p)).collect();
+
+    let mut kept_diagnostics = Vec::new();
+    for d in result.diagnostics.drain(..) {
+        let Some(p) = patch_by_row.get(&d.row) else {
+            kept_diagnostics.push(d);
+            continue;
+        };
+
+        // Resolve required fields: patch first (trimmed, non-empty),
+        // falling back to whatever the parser already extracted.
+        let site = p
+            .site
+            .as_deref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| d.parsed.site.clone());
+        let password = p
+            .password
+            .as_deref()
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+            .map(zeroize::Zeroizing::new)
+            .or_else(|| d.parsed.password.clone());
+
+        let (Some(site), Some(password)) = (site, password) else {
+            kept_diagnostics.push(d);
+            continue;
+        };
+
+        result.entries.push(ImportEntry {
+            site,
+            url: d.parsed.url.clone(),
+            username: d.parsed.username.clone(),
+            display_name: d.parsed.display_name.clone(),
+            password,
+            notes: d.parsed.notes.clone(),
+            created_at: d.parsed.created_at,
+            source_row: d.parsed.source_row.clone(),
+        });
+    }
+    result.diagnostics = kept_diagnostics;
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,5 +638,144 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(pw_count, 1);
+    }
+
+    // --- apply_patches tests ---
+
+    use super::super::{ParseDiagnostic, PartialEntry, RowPatch};
+
+    fn diag_missing_site(row: usize) -> ParseDiagnostic {
+        ParseDiagnostic {
+            row,
+            raw: format!("row {row} raw"),
+            reason: "missing site".to_string(),
+            parsed: PartialEntry {
+                site: None,
+                url: Some("https://example.com".to_string()),
+                username: Some("alice".to_string()),
+                display_name: None,
+                password: Some(zeroize::Zeroizing::new("hunter2".to_string())),
+                notes: Some("from import".to_string()),
+                created_at: None,
+                source_row: Some(format!("row {row} raw")),
+            },
+        }
+    }
+
+    fn diag_missing_password(row: usize) -> ParseDiagnostic {
+        ParseDiagnostic {
+            row,
+            raw: format!("row {row} raw"),
+            reason: "missing password".to_string(),
+            parsed: PartialEntry {
+                site: Some("Reddit".to_string()),
+                url: None,
+                username: Some("bob".to_string()),
+                display_name: None,
+                password: None,
+                notes: None,
+                created_at: None,
+                source_row: Some(format!("row {row} raw")),
+            },
+        }
+    }
+
+    #[test]
+    fn apply_patches_promotes_missing_site_to_entry_when_site_supplied() {
+        let result = ParseResult {
+            entries: Vec::new(),
+            diagnostics: vec![diag_missing_site(5)],
+        };
+        let patches = vec![RowPatch {
+            row: 5,
+            site: Some("Reddit".to_string()),
+            password: None,
+        }];
+        let out = apply_patches(result, &patches);
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].site, "Reddit");
+        assert_eq!(out.entries[0].username.as_deref(), Some("alice"));
+        assert!(out.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn apply_patches_promotes_missing_password_to_entry_when_password_supplied() {
+        let result = ParseResult {
+            entries: Vec::new(),
+            diagnostics: vec![diag_missing_password(7)],
+        };
+        let patches = vec![RowPatch {
+            row: 7,
+            site: None,
+            password: Some("S3cretPw!".to_string()),
+        }];
+        let out = apply_patches(result, &patches);
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].site, "Reddit");
+        assert_eq!(out.entries[0].password.as_str(), "S3cretPw!");
+        assert!(out.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn apply_patches_leaves_diagnostic_when_patch_field_empty_whitespace() {
+        let result = ParseResult {
+            entries: Vec::new(),
+            diagnostics: vec![diag_missing_site(5)],
+        };
+        let patches = vec![RowPatch {
+            row: 5,
+            site: Some("   ".to_string()),
+            password: None,
+        }];
+        let out = apply_patches(result, &patches);
+        assert!(out.entries.is_empty());
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].row, 5);
+    }
+
+    #[test]
+    fn apply_patches_drops_orphan_patches_referencing_unknown_rows() {
+        let result = ParseResult {
+            entries: Vec::new(),
+            diagnostics: vec![diag_missing_site(5)],
+        };
+        let patches = vec![
+            RowPatch { row: 999, site: Some("X".to_string()), password: None },
+        ];
+        let out = apply_patches(result, &patches);
+        assert!(out.entries.is_empty());
+        assert_eq!(out.diagnostics.len(), 1);
+        assert_eq!(out.diagnostics[0].row, 5);
+    }
+
+    #[test]
+    fn apply_patches_no_op_when_patches_empty() {
+        let result = ParseResult {
+            entries: Vec::new(),
+            diagnostics: vec![diag_missing_site(5), diag_missing_password(7)],
+        };
+        let out = apply_patches(result, &[]);
+        assert!(out.entries.is_empty());
+        assert_eq!(out.diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn apply_patches_combines_parsed_partial_with_patch_for_full_entry() {
+        let result = ParseResult {
+            entries: Vec::new(),
+            diagnostics: vec![diag_missing_site(5)],
+        };
+        let patches = vec![RowPatch {
+            row: 5,
+            site: Some("ExampleSite".to_string()),
+            password: None,
+        }];
+        let out = apply_patches(result, &patches);
+        let e = &out.entries[0];
+        assert_eq!(e.site, "ExampleSite");
+        assert_eq!(e.url.as_deref(), Some("https://example.com"));
+        assert_eq!(e.username.as_deref(), Some("alice"));
+        assert_eq!(e.password.as_str(), "hunter2");
+        assert_eq!(e.notes.as_deref(), Some("from import"));
     }
 }
