@@ -169,6 +169,14 @@ export interface EraSummary {
   name: string;
   start_date: string | null;
   end_date: string | null;
+  notes: string | null;
+}
+
+export interface EraFormArgs {
+  name: string;
+  start_date: string | null;  // "YYYY-MM-DD" or null
+  end_date: string | null;
+  notes: string | null;
 }
 
 // Phase 4.9 — Base Words

@@ -23,6 +23,7 @@ import type {
   RecordFeedbackPayload,
   UpdateSitePayload,
   GeneratorOptionsPayload,
+  EraFormArgs,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -155,6 +156,9 @@ export const api = {
   recoverCandidates: (filters: RecoverFilters) =>
     call<CandidateView[]>("recover_candidates", { filters }),
   listEras: () => call<EraSummary[]>("list_eras"),
+  addEra: (args: EraFormArgs) => call<number>("add_era", { args }),
+  updateEra: (id: number, args: EraFormArgs) => call<void>("update_era", { id, args }),
+  deleteEra: (id: number) => call<void>("delete_era", { id }),
 
   // Phase 4.9 — Base Words
   listBaseWords: () => call<BaseWordView[]>("list_base_words"),
