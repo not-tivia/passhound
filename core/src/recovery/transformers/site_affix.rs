@@ -51,6 +51,7 @@ fn push(out: &mut Vec<Candidate>, parent: &Candidate, s: &str, is_original: bool
         score: 0.0,
         provenance: prov,
         seed_history_id: parent.seed_history_id,
+        breakdown: None,
     });
 }
 
@@ -80,7 +81,7 @@ mod tests {
         let stats = HistoryStats::default();
         let cfg = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &cfg, pool: &pool, stats: &stats };
-        let cand = Candidate { password: Zeroizing::new("Fluffy".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("Fluffy".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = SiteAffix.transform(&cand, &rc);
         let strs: Vec<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();
         assert!(strs.contains(&"RSFluffy".to_string()));
@@ -98,7 +99,7 @@ mod tests {
         let stats = HistoryStats::default();
         let cfg = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &cfg, pool: &pool, stats: &stats };
-        let cand = Candidate { password: Zeroizing::new("Fluffy".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("Fluffy".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         assert!(SiteAffix.transform(&cand, &rc).is_empty());
     }
 
@@ -112,7 +113,7 @@ mod tests {
         let stats = HistoryStats::default();
         let cfg = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &cfg, pool: &pool, stats: &stats };
-        let cand = Candidate { password: Zeroizing::new("x".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("x".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = SiteAffix.transform(&cand, &rc);
         let strs: Vec<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();
         // Single-letter abbrevs: original == upper, so 2 unique casings.
@@ -135,6 +136,7 @@ mod tests {
             score: 0.0,
             provenance: vec![],
             seed_history_id: None,
+            breakdown: None,
         };
         let out = SiteAffix.transform(&cand, &rc);
         let strs: Vec<String> = out.iter().map(|c| c.password.as_str().to_string()).collect();

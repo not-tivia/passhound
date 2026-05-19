@@ -31,3 +31,22 @@ pub const W_ORIG_CASING: f32  = 0.20;
 // Favorite). See `clean_pattern.rs` for the decomposition rules. Score range
 // becomes [0, 1.05] when this bonus fires.
 pub const W_CLEAN_PATTERN: f32 = 0.05;
+
+// Phase 4.19 — additive bonus for candidates whose seed came from the user's
+// own password history (seed_history_id is Some). Rewards candidates that are
+// mutations of real past passwords rather than pure synthesis.
+pub const W_HISTORY_SEED: f32 = 1.0;
+
+#[derive(Debug, Clone)]
+pub struct ScoreBreakdown {
+    pub site: f32,         pub site_weighted: f32,
+    pub hint: f32,         pub hint_weighted: f32,
+    pub freq: f32,         pub freq_weighted: f32,
+    pub fav: f32,          pub fav_weighted: f32,
+    pub len: f32,          pub len_weighted: f32,
+    pub orig_casing: f32,  pub orig_casing_weighted: f32,
+    pub clean_pattern: f32, pub clean_pattern_weighted: f32,
+    pub history_seed: f32, pub history_seed_weighted: f32,
+    pub multiplier: f32,
+    pub total: f32,
+}

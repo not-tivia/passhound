@@ -44,6 +44,7 @@ fn push_child(out: &mut Vec<Candidate>, parent: &Candidate, s: &str) {
         score: 0.0,
         provenance: prov,
         seed_history_id: parent.seed_history_id,
+        breakdown: None,
     });
 }
 
@@ -70,7 +71,7 @@ mod tests {
     }
 
     fn cand(s: &str) -> Candidate {
-        Candidate { password: Zeroizing::new(s.into()), score: 0.0, provenance: vec![], seed_history_id: None }
+        Candidate { password: Zeroizing::new(s.into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None }
     }
 
     #[test]

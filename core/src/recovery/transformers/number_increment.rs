@@ -83,6 +83,7 @@ fn push(out: &mut Vec<Candidate>, parent: &Candidate, s: &str) {
         score: 0.0,
         provenance: prov,
         seed_history_id: parent.seed_history_id,
+        breakdown: None,
     });
 }
 
@@ -113,7 +114,7 @@ mod tests {
         let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
-        let cand = Candidate { password: Zeroizing::new("pw2014".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("pw2014".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = NumberIncrement.transform(&cand, &rc(&p, &s, &c));
         let strs: Vec<String> = out.iter().map(|x| x.password.as_str().to_string()).collect();
         assert!(strs.contains(&"pw2013".to_string()));
@@ -129,7 +130,7 @@ mod tests {
         let mut s = HistoryStats::default();
         s.year_suffix_freq = HashMap::from([(2014_u16, 0.5), (2018_u16, 0.3), (2020_u16, 0.2), (2010_u16, 0.05)]);
         let c = RecoverConfig::default();
-        let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = NumberIncrement.transform(&cand, &rc(&p, &s, &c));
         let strs: Vec<String> = out.iter().map(|x| x.password.as_str().to_string()).collect();
         assert!(strs.contains(&"plain2014".to_string()));
@@ -144,7 +145,7 @@ mod tests {
         let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
-        let cand = Candidate { password: Zeroizing::new("x1".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("x1".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = NumberIncrement.transform(&cand, &rc(&p, &s, &c));
         for o in &out {
             // Should never produce x-1, x-2, etc. (negatives skipped).
@@ -164,7 +165,7 @@ mod tests {
         };
         let s = HistoryStats::default(); // no stats years
         let c = RecoverConfig::default();
-        let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = NumberIncrement.transform(&cand, &rc(&p, &s, &c));
         let strs: Vec<String> = out.iter().map(|x| x.password.as_str().to_string()).collect();
         // Era window 2016-2019 with a 1-year buffer on each side -> 2015..=2020.

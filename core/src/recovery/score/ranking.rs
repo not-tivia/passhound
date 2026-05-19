@@ -156,7 +156,7 @@ mod tests {
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("plain".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let v = score(&cand, &rc, None);
         assert!((0.0..=1.0).contains(&v));
     }
@@ -168,8 +168,8 @@ mod tests {
         let mut c = RecoverConfig::default();
         c.hint = Some("flu".into());
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let with_hint = Candidate { password: Zeroizing::new("Fluffy".into()), score: 0.0, provenance: vec![], seed_history_id: None };
-        let no_hint = Candidate { password: Zeroizing::new("Other".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let with_hint = Candidate { password: Zeroizing::new("Fluffy".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
+        let no_hint = Candidate { password: Zeroizing::new("Other".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         assert!(score(&with_hint, &rc, None) > score(&no_hint, &rc, None));
     }
 
@@ -187,8 +187,8 @@ mod tests {
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let strong = Candidate { password: Zeroizing::new("X".into()), score: 0.0, provenance: vec![], seed_history_id: Some(1) };
-        let weak = Candidate { password: Zeroizing::new("Y".into()), score: 0.0, provenance: vec![], seed_history_id: Some(2) };
+        let strong = Candidate { password: Zeroizing::new("X".into()), score: 0.0, provenance: vec![], seed_history_id: Some(1), breakdown: None };
+        let weak = Candidate { password: Zeroizing::new("Y".into()), score: 0.0, provenance: vec![], seed_history_id: Some(2), breakdown: None };
         assert!(score(&strong, &rc, None) > score(&weak, &rc, None));
     }
 
@@ -199,8 +199,8 @@ mod tests {
         s.trailing_symbol_freq = HashMap::from([('!', 0.9)]);
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let with = Candidate { password: Zeroizing::new("abc!".into()), score: 0.0, provenance: vec![], seed_history_id: None };
-        let without = Candidate { password: Zeroizing::new("abcz".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let with = Candidate { password: Zeroizing::new("abc!".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
+        let without = Candidate { password: Zeroizing::new("abcz".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         assert!(score(&with, &rc, None) > score(&without, &rc, None));
     }
 
@@ -221,8 +221,8 @@ mod tests {
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let with = Candidate { password: Zeroizing::new("Fluffy123".into()), score: 0.0, provenance: vec![], seed_history_id: None };
-        let without = Candidate { password: Zeroizing::new("Banana123".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let with = Candidate { password: Zeroizing::new("Fluffy123".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
+        let without = Candidate { password: Zeroizing::new("Banana123".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         assert!(score(&with, &rc, None) > score(&without, &rc, None));
     }
 
@@ -244,12 +244,14 @@ mod tests {
             score: 0.0,
             provenance: vec![],
             seed_history_id: None,
+            breakdown: None,
         };
         let without = Candidate {
             password: Zeroizing::new("MoonBeam$2019".into()),
             score: 0.0,
             provenance: vec![],
             seed_history_id: None,
+            breakdown: None,
         };
         assert!(score(&with_abbr, &rc, None) > score(&without, &rc, None),
             "containing site abbrev should bump score when --site is set");
@@ -266,12 +268,14 @@ mod tests {
             score: 0.0,
             provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
             seed_history_id: None,
+            breakdown: None,
         };
         let without_oc = Candidate {
             password: Zeroizing::new("MoonBeam".into()),
             score: 0.0,
             provenance: vec![RuleId::WordCombine],
             seed_history_id: None,
+            breakdown: None,
         };
         assert!(score(&with_oc, &rc, None) > score(&without_oc, &rc, None),
             "OriginalCasing in provenance must boost score");
@@ -312,12 +316,14 @@ mod tests {
             score: 0.0,
             provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
             seed_history_id: None,
+            breakdown: None,
         };
         let dirty = Candidate {
             password: Zeroizing::new("MoonBeam$2019Rd!".into()),
             score: 0.0,
             provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
             seed_history_id: None,
+            breakdown: None,
         };
         let s_clean = score(&clean, &rc, None);
         let s_dirty = score(&dirty, &rc, None);
@@ -348,6 +354,7 @@ mod tests {
             score: 0.0,
             provenance: vec![RuleId::BaseWordPool, RuleId::SiteAffix],
             seed_history_id: None,
+            breakdown: None,
         };
 
         let base = score(&c, &ctx, None);

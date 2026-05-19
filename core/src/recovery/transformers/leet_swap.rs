@@ -77,6 +77,7 @@ fn push(out: &mut Vec<Candidate>, parent: &Candidate, s: &str) {
         score: 0.0,
         provenance: prov,
         seed_history_id: parent.seed_history_id,
+        breakdown: None,
     });
 }
 
@@ -106,7 +107,7 @@ mod tests {
         let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
-        let cand = Candidate { password: Zeroizing::new("apples".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("apples".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = LeetSwap.transform(&cand, &rc(&p, &s, &c));
         let strs: Vec<String> = out.iter().map(|x| x.password.as_str().to_string()).collect();
         assert!(strs.contains(&"@pples".to_string()));
@@ -121,7 +122,7 @@ mod tests {
         let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
-        let cand = Candidate { password: Zeroizing::new("xyz".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("xyz".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         assert!(LeetSwap.transform(&cand, &rc(&p, &s, &c)).is_empty());
     }
 
@@ -130,7 +131,7 @@ mod tests {
         let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
-        let cand = Candidate { password: Zeroizing::new("aeiosaeio".into()), score: 0.0, provenance: vec![], seed_history_id: None };
+        let cand = Candidate { password: Zeroizing::new("aeiosaeio".into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None };
         let out = LeetSwap.transform(&cand, &rc(&p, &s, &c));
         assert!(out.len() <= MAX_OUT);
     }

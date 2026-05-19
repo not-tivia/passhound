@@ -28,6 +28,7 @@ pub struct Candidate {
     pub score: f32,
     pub provenance: Vec<RuleId>,
     pub seed_history_id: Option<i64>,
+    pub breakdown: Option<crate::recovery::score::ScoreBreakdown>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -41,6 +42,7 @@ pub enum RuleId {
     LeetSwap,
     EraBoost,
     OriginalCasing,
+    HistorySeed,
 }
 
 impl RuleId {
@@ -56,6 +58,7 @@ impl RuleId {
             RuleId::LeetSwap        => "LEET",
             RuleId::EraBoost        => "H",
             RuleId::OriginalCasing  => "ORIG",
+            RuleId::HistorySeed     => "HIST",
         }
     }
     pub fn name(&self) -> &'static str {
@@ -69,6 +72,7 @@ impl RuleId {
             RuleId::LeetSwap        => "LeetSwap",
             RuleId::EraBoost        => "EraBoost",
             RuleId::OriginalCasing  => "OriginalCasing",
+            RuleId::HistorySeed     => "HistorySeed",
         }
     }
     /// Inverse of `tag()`. Returns `None` for unknown strings.
@@ -83,6 +87,7 @@ impl RuleId {
             "LEET" => Some(RuleId::LeetSwap),
             "H"    => Some(RuleId::EraBoost),
             "ORIG" => Some(RuleId::OriginalCasing),
+            "HIST" => Some(RuleId::HistorySeed),
             _      => None,
         }
     }
@@ -155,6 +160,7 @@ mod tests {
             RuleId::BaseWordPool, RuleId::WordCombine, RuleId::CaseVariations,
             RuleId::SpecialSuffix, RuleId::SiteAffix, RuleId::NumberIncrement,
             RuleId::LeetSwap, RuleId::EraBoost, RuleId::OriginalCasing,
+            RuleId::HistorySeed,
         ] {
             assert!(!r.tag().is_empty());
             assert!(!r.name().is_empty());
@@ -181,6 +187,7 @@ mod tests {
             RuleId::LeetSwap,
             RuleId::EraBoost,
             RuleId::OriginalCasing,
+            RuleId::HistorySeed,
         ] {
             let t = r.tag();
             let back = RuleId::from_tag(t);

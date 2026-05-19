@@ -40,6 +40,7 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
             score: 0.0,
             provenance: vec![],
             seed_history_id: Some(ps.history_id),
+            breakdown: None,
         });
     }
 

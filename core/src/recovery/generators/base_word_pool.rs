@@ -39,6 +39,7 @@ impl Generator for BaseWordPool {
                         score: 0.0,
                         provenance: prov,
                         seed_history_id: None,
+                        breakdown: None,
                     });
                 }
             }
@@ -61,6 +62,7 @@ impl Generator for BaseWordPool {
                     score: 0.0,
                     provenance: prov,
                     seed_history_id: None,
+                    breakdown: None,
                 });
             }
         }

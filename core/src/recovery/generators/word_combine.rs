@@ -53,6 +53,7 @@ fn push_pair(out: &mut Vec<Candidate>, a_canon: &str, b_canon: &str, a_orig: &st
             score: 0.0,
             provenance: vec![RuleId::WordCombine],
             seed_history_id: None,
+            breakdown: None,
         });
         // TitleCase each word.
         let title_a = title_case(a_canon);
@@ -62,6 +63,7 @@ fn push_pair(out: &mut Vec<Candidate>, a_canon: &str, b_canon: &str, a_orig: &st
             score: 0.0,
             provenance: vec![RuleId::WordCombine],
             seed_history_id: None,
+            breakdown: None,
         });
         // Original casing — privileged variant tagged with RuleId::OriginalCasing
         // so ranking::score awards the W_ORIG_CASING bonus. When canonical ==
@@ -73,6 +75,7 @@ fn push_pair(out: &mut Vec<Candidate>, a_canon: &str, b_canon: &str, a_orig: &st
             score: 0.0,
             provenance: vec![RuleId::WordCombine, RuleId::OriginalCasing],
             seed_history_id: None,
+            breakdown: None,
         });
     }
 }

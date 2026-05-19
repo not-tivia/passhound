@@ -71,7 +71,7 @@ mod tests {
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: Some(1) };
+        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: Some(1), breakdown: None };
         EraBoost.adjust(&mut cand, &rc);
         assert!(cand.score > 1.4 && cand.score <= 1.5);
         assert!(cand.provenance.contains(&RuleId::EraBoost));
@@ -83,7 +83,7 @@ mod tests {
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: Some(1) };
+        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: Some(1), breakdown: None };
         EraBoost.adjust(&mut cand, &rc);
         assert!((cand.score - 1.0).abs() < 0.01, "10+ years away -> no boost; got {}", cand.score);
     }
@@ -95,7 +95,7 @@ mod tests {
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: Some(1) };
+        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: Some(1), breakdown: None };
         EraBoost.adjust(&mut cand, &rc);
         assert_eq!(cand.score, 1.0);
         assert!(!cand.provenance.contains(&RuleId::EraBoost));
@@ -107,7 +107,7 @@ mod tests {
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
-        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: None };
+        let mut cand = Candidate { password: Zeroizing::new("x".into()), score: 1.0, provenance: vec![], seed_history_id: None, breakdown: None };
         EraBoost.adjust(&mut cand, &rc);
         assert_eq!(cand.score, 1.0);
     }

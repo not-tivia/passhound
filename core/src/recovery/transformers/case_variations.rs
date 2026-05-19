@@ -34,6 +34,7 @@ fn make_child(parent: &Candidate, s: String) -> Candidate {
         score: 0.0,
         provenance: prov,
         seed_history_id: parent.seed_history_id,
+        breakdown: None,
     }
 }
 
@@ -89,7 +90,7 @@ mod tests {
     }
 
     fn cand(s: &str) -> Candidate {
-        Candidate { password: Zeroizing::new(s.into()), score: 0.0, provenance: vec![], seed_history_id: None }
+        Candidate { password: Zeroizing::new(s.into()), score: 0.0, provenance: vec![], seed_history_id: None, breakdown: None }
     }
 
     #[test]
