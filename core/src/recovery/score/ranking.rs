@@ -2,7 +2,7 @@
 
 use crate::recovery::clean_pattern;
 use crate::recovery::score::{
-    W_CLEAN_PATTERN, W_FAV_BASE, W_FREQ, W_HINT, W_LEN, W_ORIG_CASING, W_SITE,
+    W_CLEAN_PATTERN, W_FAV_BASE, W_FREQ, W_HINT, W_HISTORY_SEED, W_LEN, W_ORIG_CASING, W_SITE,
 };
 use crate::recovery::stats::{count_trailing_digits, trailing_year};
 use crate::recovery::{Candidate, RecoverContext, RuleId};
@@ -13,6 +13,14 @@ pub fn score(
     ctx: &RecoverContext<'_>,
     multipliers: Option<&HashMap<RuleId, f32>>,
 ) -> f32 {
+    score_with_breakdown(c, ctx, multipliers).0
+}
+
+pub fn score_with_breakdown(
+    c: &Candidate,
+    ctx: &RecoverContext<'_>,
+    multipliers: Option<&HashMap<RuleId, f32>>,
+) -> (f32, crate::recovery::score::ScoreBreakdown) {
     // Site signal: prefer the seed-derived site_match_strength when the candidate
     // descends from a real history seed. For generated candidates (BaseWordPool /
     // WordCombine, no seed_history_id) fall back to a post-hoc check: when the
@@ -44,12 +52,8 @@ pub fn score(
     let fav  = if contains_any_favorite(c, ctx) { 1.0 } else { 0.0 };
     let len  = length_match(c, ctx);
     let orig = if c.provenance.contains(&RuleId::OriginalCasing) { 1.0 } else { 0.0 };
-    let mut total = W_SITE * site
-        + W_HINT * hint
-        + W_FREQ * freq
-        + W_FAV_BASE * fav
-        + W_LEN * len
-        + W_ORIG_CASING * orig;
+    let history_seed = if c.provenance.contains(&RuleId::HistorySeed) { 1.0 } else { 0.0 };
+
     // Clean-pattern bonus (Phase 3.8 + 3.9): additive bonus scaled by the
     // count of DISTINCT segment types in the decomposition. Returns 0..=4:
     //   0 -> dirty (no bonus)
@@ -63,11 +67,22 @@ pub fn score(
     // `<F><F><D><A>` (3 types: no symbol separator) which was crowding
     // the target out via len_match.
     let diversity = clean_pattern::is_clean_pattern(c.password.as_str(), ctx);
-    if diversity > 0 {
-        total += W_CLEAN_PATTERN * (diversity as f32) / 4.0;
-    }
+    let clean_pattern = if diversity > 0 { diversity as f32 / 4.0 } else { 0.0 };
 
-    let rule_multiplier = match multipliers {
+    let site_weighted         = W_SITE          * site;
+    let hint_weighted         = W_HINT          * hint;
+    let freq_weighted         = W_FREQ          * freq;
+    let fav_weighted          = W_FAV_BASE      * fav;
+    let len_weighted          = W_LEN           * len;
+    let orig_casing_weighted  = W_ORIG_CASING   * orig;
+    let clean_pattern_weighted = W_CLEAN_PATTERN * clean_pattern;
+    let history_seed_weighted = W_HISTORY_SEED  * history_seed;
+
+    let mut total = site_weighted + hint_weighted + freq_weighted + fav_weighted
+        + len_weighted + orig_casing_weighted + clean_pattern_weighted
+        + history_seed_weighted;
+
+    let multiplier = match multipliers {
         None => 1.0,
         Some(_) if c.provenance.is_empty() => 1.0,
         Some(m) => {
@@ -77,7 +92,21 @@ pub fn score(
             sum / c.provenance.len() as f32
         }
     };
-    total * rule_multiplier
+    total *= multiplier;
+
+    let breakdown = crate::recovery::score::ScoreBreakdown {
+        site, site_weighted,
+        hint, hint_weighted,
+        freq, freq_weighted,
+        fav, fav_weighted,
+        len, len_weighted,
+        orig_casing: orig, orig_casing_weighted,
+        clean_pattern, clean_pattern_weighted,
+        history_seed, history_seed_weighted,
+        multiplier,
+        total,
+    };
+    (total, breakdown)
 }
 
 fn pattern_freq_match(c: &Candidate, ctx: &RecoverContext<'_>) -> f32 {
@@ -372,5 +401,54 @@ mod tests {
             "expected {} (= base {} * 1.1), got {}",
             expected, base, with_mult
         );
+    }
+
+    #[test]
+    fn history_seed_provenance_outranks_synthesized_ceteris_paribus() {
+        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let with_history = Candidate {
+            password: Zeroizing::new("Whatever".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let without_history = Candidate {
+            password: Zeroizing::new("Whatever".into()),
+            score: 0.0,
+            provenance: vec![RuleId::BaseWordPool],
+            seed_history_id: None,
+            breakdown: None,
+        };
+        assert!(
+            score(&with_history, &rc, None) > score(&without_history, &rc, None),
+            "HistorySeed in provenance must outscore non-history candidates ceteris paribus",
+        );
+    }
+
+    #[test]
+    fn score_with_breakdown_returns_total_equal_to_score() {
+        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let s = HistoryStats::default();
+        let mut c = RecoverConfig::default();
+        c.hint = Some("xyz".into());
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("xyz123".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed, RuleId::OriginalCasing],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let total = score(&cand, &rc, None);
+        let (total2, breakdown) = score_with_breakdown(&cand, &rc, None);
+        assert!((total - total2).abs() < 1e-6, "score and score_with_breakdown must agree");
+        assert!((breakdown.total - total).abs() < 1e-6, "breakdown.total must equal returned score");
+        assert_eq!(breakdown.history_seed, 1.0, "history_seed raw factor should be 1.0 for HistorySeed provenance");
+        assert!((breakdown.history_seed_weighted - 1.0).abs() < 1e-6, "history_seed_weighted = W_HISTORY_SEED (1.0) when present");
+        assert_eq!(breakdown.orig_casing, 1.0, "orig_casing raw should be 1.0 for OriginalCasing in provenance");
     }
 }
