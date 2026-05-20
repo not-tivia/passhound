@@ -1387,6 +1387,37 @@ pub struct RuleTag {
     pub name: String,
 }
 
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct ScoreBreakdownView {
+    pub site: f32,         pub site_weighted: f32,
+    pub hint: f32,         pub hint_weighted: f32,
+    pub freq: f32,         pub freq_weighted: f32,
+    pub fav: f32,          pub fav_weighted: f32,
+    pub len: f32,          pub len_weighted: f32,
+    pub orig_casing: f32,  pub orig_casing_weighted: f32,
+    pub clean_pattern: f32, pub clean_pattern_weighted: f32,
+    pub history_seed: f32, pub history_seed_weighted: f32,
+    pub multiplier: f32,
+    pub total: f32,
+}
+
+impl From<&passhound_core::recovery::score::ScoreBreakdown> for ScoreBreakdownView {
+    fn from(b: &passhound_core::recovery::score::ScoreBreakdown) -> Self {
+        Self {
+            site: b.site, site_weighted: b.site_weighted,
+            hint: b.hint, hint_weighted: b.hint_weighted,
+            freq: b.freq, freq_weighted: b.freq_weighted,
+            fav: b.fav, fav_weighted: b.fav_weighted,
+            len: b.len, len_weighted: b.len_weighted,
+            orig_casing: b.orig_casing, orig_casing_weighted: b.orig_casing_weighted,
+            clean_pattern: b.clean_pattern, clean_pattern_weighted: b.clean_pattern_weighted,
+            history_seed: b.history_seed, history_seed_weighted: b.history_seed_weighted,
+            multiplier: b.multiplier,
+            total: b.total,
+        }
+    }
+}
+
 /// Metadata for a single recovery candidate. The plaintext lives in
 /// `VaultState.candidate_cache` and is fetched via `reveal_candidate`
 /// or written to the clipboard via `copy_candidate`. Indexed by
@@ -1396,6 +1427,7 @@ pub struct CandidateView {
     pub rank: usize,
     pub score: f32,
     pub provenance: Vec<RuleTag>,
+    pub breakdown: Option<ScoreBreakdownView>,
 }
 
 #[derive(serde::Serialize, Debug, Clone)]
@@ -1456,6 +1488,7 @@ pub fn recover_candidates_inner(
                     name: r.name().to_string(),
                 })
                 .collect(),
+            breakdown: c.breakdown.as_ref().map(Into::into),
         })
         .collect())
 }
@@ -3442,6 +3475,7 @@ mod tests {
             rank: 1,
             score: 0.5,
             provenance: vec![],
+            breakdown: None,
         };
     }
 
