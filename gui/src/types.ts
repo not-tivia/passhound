@@ -180,10 +180,24 @@ export interface RuleTag {
   name: string;
 }
 
+export interface ScoreBreakdown {
+  site: number;              site_weighted: number;
+  hint: number;              hint_weighted: number;
+  freq: number;              freq_weighted: number;
+  fav: number;               fav_weighted: number;
+  len: number;               len_weighted: number;
+  orig_casing: number;       orig_casing_weighted: number;
+  clean_pattern: number;     clean_pattern_weighted: number;
+  history_seed: number;      history_seed_weighted: number;
+  multiplier: number;
+  total: number;
+}
+
 export interface CandidateView {
   rank: number;
   score: number;
   provenance: RuleTag[];
+  breakdown: ScoreBreakdown | null;
 }
 
 export interface EraSummary {

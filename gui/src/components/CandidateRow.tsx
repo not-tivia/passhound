@@ -28,6 +28,7 @@ export default function CandidateRow({
   const [busy, setBusy] = useState(false);
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind>("none");
   const [rowRevealed, setRowRevealed] = useState(revealed);
+  const [breakdownExpanded, setBreakdownExpanded] = useState(false);
   const [revealedText, setRevealedText] = useState<string | null>(null);
 
   // Keep local rowRevealed in sync with the prop (revealAll toggle).
@@ -109,49 +110,100 @@ export default function CandidateRow({
     ? "(no rules)"
     : `${candidate.provenance.map((r) => r.tag).join("+")}: ${candidate.provenance.map((r) => r.name).join(" + ")}`;
 
+  const bd = candidate.breakdown;
+
   return (
-    <div className={`candidate-row${tried ? " candidate-row--tried" : ""}${feedbackKind !== "none" ? " candidate-row--feedback" : ""}`}>
-      <span className="candidate-row__rank">#{candidate.rank}</span>
-      <span className="candidate-row__score">{candidate.score.toFixed(2)}</span>
-      <span className="candidate-row__pw">{rowRevealed && revealedText !== null ? revealedText : MASK}</span>
-      <span className="candidate-row__why" title={provenanceText}>{provenanceText}</span>
-      <span className="candidate-row__actions">
-        <button
-          className="candidate-row__btn"
-          onClick={handleCopy}
-          disabled={busy}
-          aria-label="Copy candidate"
-          title="Copy to clipboard"
-        >
-          {"\u{1F4CB}"}
-        </button>
-        <button
-          className="candidate-row__btn candidate-row__btn--tried"
-          onClick={onToggleTried}
-          aria-label={tried ? "Unmark tried" : "Mark as tried"}
-          title={tried ? "Unmark tried" : "Mark as tried"}
-        >
-          {tried ? "\u{2713}" : "\u{25EF}"}
-        </button>
-        <button
-          className={`candidate-row__btn candidate-row__btn--worked${feedbackKind === "worked" ? " candidate-row__btn--filled" : ""}`}
-          onClick={() => handleFeedback(true)}
-          disabled={busy}
-          aria-label="Mark as worked"
-          title="Mark as worked"
-        >
-          {"\u{2713}"}
-        </button>
-        <button
-          className={`candidate-row__btn candidate-row__btn--didnt-work${feedbackKind === "didnt-work" ? " candidate-row__btn--filled" : ""}`}
-          onClick={() => handleFeedback(false)}
-          disabled={busy}
-          aria-label="Mark as didn't work"
-          title="Mark as didn't work"
-        >
-          {"\u{2715}"}
-        </button>
-      </span>
-    </div>
+    <>
+      <div className={`candidate-row${tried ? " candidate-row--tried" : ""}${feedbackKind !== "none" ? " candidate-row--feedback" : ""}`}>
+        <span className="candidate-row__rank">
+          {bd && (
+            <button
+              className="candidate-row__chevron"
+              onClick={() => setBreakdownExpanded((v) => !v)}
+              aria-label={breakdownExpanded ? "Collapse breakdown" : "Expand breakdown"}
+              title={breakdownExpanded ? "Collapse score breakdown" : "Expand score breakdown"}
+            >
+              {breakdownExpanded ? "▾" : "▸"}
+            </button>
+          )}
+          #{candidate.rank}
+        </span>
+        <span className="candidate-row__score">{candidate.score.toFixed(2)}</span>
+        <span className="candidate-row__pw">{rowRevealed && revealedText !== null ? revealedText : MASK}</span>
+        <span className="candidate-row__why" title={provenanceText}>{provenanceText}</span>
+        <span className="candidate-row__actions">
+          <button
+            className="candidate-row__btn"
+            onClick={handleCopy}
+            disabled={busy}
+            aria-label="Copy candidate"
+            title="Copy to clipboard"
+          >
+            {"\u{1F4CB}"}
+          </button>
+          <button
+            className="candidate-row__btn candidate-row__btn--tried"
+            onClick={onToggleTried}
+            aria-label={tried ? "Unmark tried" : "Mark as tried"}
+            title={tried ? "Unmark tried" : "Mark as tried"}
+          >
+            {tried ? "\u{2713}" : "\u{25EF}"}
+          </button>
+          <button
+            className={`candidate-row__btn candidate-row__btn--worked${feedbackKind === "worked" ? " candidate-row__btn--filled" : ""}`}
+            onClick={() => handleFeedback(true)}
+            disabled={busy}
+            aria-label="Mark as worked"
+            title="Mark as worked"
+          >
+            {"\u{2713}"}
+          </button>
+          <button
+            className={`candidate-row__btn candidate-row__btn--didnt-work${feedbackKind === "didnt-work" ? " candidate-row__btn--filled" : ""}`}
+            onClick={() => handleFeedback(false)}
+            disabled={busy}
+            aria-label="Mark as didn't work"
+            title="Mark as didn't work"
+          >
+            {"\u{2715}"}
+          </button>
+        </span>
+      </div>
+      {breakdownExpanded && bd && (
+        <div className="candidate-row__breakdown-row">
+          <table className="candidate-row__breakdown">
+            <tbody>
+              {(
+                [
+                  ["site",         bd.site,         bd.site_weighted],
+                  ["hint",         bd.hint,         bd.hint_weighted],
+                  ["freq",         bd.freq,         bd.freq_weighted],
+                  ["fav",          bd.fav,          bd.fav_weighted],
+                  ["length",       bd.len,          bd.len_weighted],
+                  ["orig_casing",  bd.orig_casing,  bd.orig_casing_weighted],
+                  ["clean_pat",    bd.clean_pattern, bd.clean_pattern_weighted],
+                  ["history_seed", bd.history_seed, bd.history_seed_weighted],
+                ] as [string, number, number][]
+              ).map(([name, raw, weighted]) => (
+                <tr key={name}>
+                  <td>{name}</td>
+                  <td>{raw.toFixed(2)}</td>
+                  <td>=</td>
+                  <td>{weighted.toFixed(2)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td colSpan={3}>multiplier</td>
+                <td>&times;{bd.multiplier.toFixed(2)}</td>
+              </tr>
+              <tr className="candidate-row__breakdown-total">
+                <td colSpan={3}>total</td>
+                <td>{bd.total.toFixed(3)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }

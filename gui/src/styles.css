@@ -2159,3 +2159,37 @@ select option {
   flex: 1;
   min-width: 100px;
 }
+
+/* Phase 4.19 — CandidateRow score breakdown */
+.candidate-row__chevron {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 0.8rem;
+  margin-right: 4px;
+}
+.candidate-row__chevron:hover {
+  color: var(--text-1);
+}
+.candidate-row__breakdown-row {
+  background: var(--bg-1);
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid #1a1a22;
+}
+.candidate-row__breakdown {
+  width: auto;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--text-2);
+}
+.candidate-row__breakdown td {
+  padding: 0.15rem 0.5rem;
+  border: none;
+}
+.candidate-row__breakdown-total {
+  font-weight: 600;
+  color: var(--text-1);
+  border-top: 1px solid var(--border);
+}
