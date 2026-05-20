@@ -97,6 +97,33 @@ impl RuleId {
     }
 }
 
+/// Compose child provenance for a transformer applying `rule` to `parent`.
+///
+/// Semantics:
+/// - If parent was a HistorySeed (verbatim historical password), the child
+///   is downgraded to HistoryDescendant — the child has been mutated by the
+///   transformer, so it's no longer the verbatim historical password, but
+///   still derives from one.
+/// - If parent was already a HistoryDescendant, the child stays a
+///   HistoryDescendant (transitivity through multi-pass transformations).
+/// - If parent had no history lineage (synthesized from generators), the
+///   child has no history lineage either.
+/// - The transformer's own RuleId is appended (deduplicated against the
+///   existing provenance).
+pub fn child_provenance(parent: &Candidate, rule: RuleId) -> Vec<RuleId> {
+    let mut prov = parent.provenance.clone();
+    let was_history = prov.contains(&RuleId::HistorySeed)
+        || prov.contains(&RuleId::HistoryDescendant);
+    prov.retain(|r| *r != RuleId::HistorySeed);
+    if was_history && !prov.contains(&RuleId::HistoryDescendant) {
+        prov.push(RuleId::HistoryDescendant);
+    }
+    if !prov.contains(&rule) {
+        prov.push(rule);
+    }
+    prov
+}
+
 /// Hints from the CLI; everything optional.
 #[derive(Debug, Clone, Default)]
 pub struct RecoverConfig {
@@ -199,5 +226,72 @@ mod tests {
             assert_eq!(back, Some(r), "round trip failed for {:?}", r);
         }
         assert_eq!(RuleId::from_tag("nonexistent"), None);
+    }
+
+    #[test]
+    fn child_provenance_downgrades_history_seed_to_descendant() {
+        let parent = Candidate {
+            password: Zeroizing::new("test".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let child = child_provenance(&parent, RuleId::NumberIncrement);
+        assert!(!child.contains(&RuleId::HistorySeed),
+            "HistorySeed must be removed from child provenance after transformation");
+        assert!(child.contains(&RuleId::HistoryDescendant),
+            "child must carry HistoryDescendant when parent was HistorySeed");
+        assert!(child.contains(&RuleId::NumberIncrement),
+            "child must include the transformer's own RuleId");
+    }
+
+    #[test]
+    fn child_provenance_keeps_history_descendant_transitive() {
+        let parent = Candidate {
+            password: Zeroizing::new("test".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistoryDescendant, RuleId::SiteAffix],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let child = child_provenance(&parent, RuleId::NumberIncrement);
+        assert!(child.contains(&RuleId::HistoryDescendant),
+            "transitive: HistoryDescendant survives subsequent transformations");
+        assert!(child.contains(&RuleId::SiteAffix),
+            "prior transformer rules survive");
+        assert!(child.contains(&RuleId::NumberIncrement),
+            "new transformer rule appended");
+    }
+
+    #[test]
+    fn child_provenance_no_lineage_when_parent_synthesized() {
+        let parent = Candidate {
+            password: Zeroizing::new("test".into()),
+            score: 0.0,
+            provenance: vec![RuleId::BaseWordPool],
+            seed_history_id: None,
+            breakdown: None,
+        };
+        let child = child_provenance(&parent, RuleId::NumberIncrement);
+        assert!(!child.contains(&RuleId::HistorySeed));
+        assert!(!child.contains(&RuleId::HistoryDescendant),
+            "non-history parent must produce non-history child");
+        assert!(child.contains(&RuleId::BaseWordPool));
+        assert!(child.contains(&RuleId::NumberIncrement));
+    }
+
+    #[test]
+    fn child_provenance_appends_rule_only_once() {
+        let parent = Candidate {
+            password: Zeroizing::new("test".into()),
+            score: 0.0,
+            provenance: vec![RuleId::BaseWordPool, RuleId::NumberIncrement],
+            seed_history_id: None,
+            breakdown: None,
+        };
+        let child = child_provenance(&parent, RuleId::NumberIncrement);
+        let count = child.iter().filter(|r| **r == RuleId::NumberIncrement).count();
+        assert_eq!(count, 1, "rule must be deduplicated against existing provenance");
     }
 }
