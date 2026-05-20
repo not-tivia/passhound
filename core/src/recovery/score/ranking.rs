@@ -103,6 +103,7 @@ pub fn score_with_breakdown(
         orig_casing: orig, orig_casing_weighted,
         clean_pattern, clean_pattern_weighted,
         history_seed, history_seed_weighted,
+        history_descendant: 0.0, history_descendant_weighted: 0.0,
         multiplier,
         total,
     };

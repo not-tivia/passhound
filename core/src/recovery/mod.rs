@@ -43,52 +43,56 @@ pub enum RuleId {
     EraBoost,
     OriginalCasing,
     HistorySeed,
+    HistoryDescendant,
 }
 
 impl RuleId {
     /// Short tag used in why-output. Matches chris's pattern letters where possible.
     pub fn tag(&self) -> &'static str {
         match self {
-            RuleId::BaseWordPool    => "G",
-            RuleId::WordCombine     => "D",
-            RuleId::CaseVariations  => "CASE",
-            RuleId::SpecialSuffix   => "B",
-            RuleId::SiteAffix       => "E",
-            RuleId::NumberIncrement => "F",
-            RuleId::LeetSwap        => "LEET",
-            RuleId::EraBoost        => "H",
-            RuleId::OriginalCasing  => "ORIG",
-            RuleId::HistorySeed     => "HIST",
+            RuleId::BaseWordPool      => "G",
+            RuleId::WordCombine       => "D",
+            RuleId::CaseVariations    => "CASE",
+            RuleId::SpecialSuffix     => "B",
+            RuleId::SiteAffix         => "E",
+            RuleId::NumberIncrement   => "F",
+            RuleId::LeetSwap          => "LEET",
+            RuleId::EraBoost          => "H",
+            RuleId::OriginalCasing    => "ORIG",
+            RuleId::HistorySeed       => "HIST",
+            RuleId::HistoryDescendant => "HDESC",
         }
     }
     pub fn name(&self) -> &'static str {
         match self {
-            RuleId::BaseWordPool    => "BaseWordPool",
-            RuleId::WordCombine     => "WordCombine",
-            RuleId::CaseVariations  => "CaseVariations",
-            RuleId::SpecialSuffix   => "SpecialSuffix",
-            RuleId::SiteAffix       => "SiteAffix",
-            RuleId::NumberIncrement => "NumberIncrement",
-            RuleId::LeetSwap        => "LeetSwap",
-            RuleId::EraBoost        => "EraBoost",
-            RuleId::OriginalCasing  => "OriginalCasing",
-            RuleId::HistorySeed     => "HistorySeed",
+            RuleId::BaseWordPool      => "BaseWordPool",
+            RuleId::WordCombine       => "WordCombine",
+            RuleId::CaseVariations    => "CaseVariations",
+            RuleId::SpecialSuffix     => "SpecialSuffix",
+            RuleId::SiteAffix         => "SiteAffix",
+            RuleId::NumberIncrement   => "NumberIncrement",
+            RuleId::LeetSwap          => "LeetSwap",
+            RuleId::EraBoost          => "EraBoost",
+            RuleId::OriginalCasing    => "OriginalCasing",
+            RuleId::HistorySeed       => "HistorySeed",
+            RuleId::HistoryDescendant => "HistoryDescendant",
         }
     }
     /// Inverse of `tag()`. Returns `None` for unknown strings.
     pub fn from_tag(s: &str) -> Option<RuleId> {
         match s {
-            "G"    => Some(RuleId::BaseWordPool),
-            "D"    => Some(RuleId::WordCombine),
-            "CASE" => Some(RuleId::CaseVariations),
-            "B"    => Some(RuleId::SpecialSuffix),
-            "E"    => Some(RuleId::SiteAffix),
-            "F"    => Some(RuleId::NumberIncrement),
-            "LEET" => Some(RuleId::LeetSwap),
-            "H"    => Some(RuleId::EraBoost),
-            "ORIG" => Some(RuleId::OriginalCasing),
-            "HIST" => Some(RuleId::HistorySeed),
-            _      => None,
+            "G"     => Some(RuleId::BaseWordPool),
+            "D"     => Some(RuleId::WordCombine),
+            "CASE"  => Some(RuleId::CaseVariations),
+            "B"     => Some(RuleId::SpecialSuffix),
+            "E"     => Some(RuleId::SiteAffix),
+            "F"     => Some(RuleId::NumberIncrement),
+            "LEET"  => Some(RuleId::LeetSwap),
+            "H"     => Some(RuleId::EraBoost),
+            "ORIG"  => Some(RuleId::OriginalCasing),
+            "HIST"  => Some(RuleId::HistorySeed),
+            "HDESC" => Some(RuleId::HistoryDescendant),
+            _       => None,
         }
     }
 }
@@ -160,7 +164,7 @@ mod tests {
             RuleId::BaseWordPool, RuleId::WordCombine, RuleId::CaseVariations,
             RuleId::SpecialSuffix, RuleId::SiteAffix, RuleId::NumberIncrement,
             RuleId::LeetSwap, RuleId::EraBoost, RuleId::OriginalCasing,
-            RuleId::HistorySeed,
+            RuleId::HistorySeed, RuleId::HistoryDescendant,
         ] {
             assert!(!r.tag().is_empty());
             assert!(!r.name().is_empty());
@@ -188,6 +192,7 @@ mod tests {
             RuleId::EraBoost,
             RuleId::OriginalCasing,
             RuleId::HistorySeed,
+            RuleId::HistoryDescendant,
         ] {
             let t = r.tag();
             let back = RuleId::from_tag(t);

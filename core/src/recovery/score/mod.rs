@@ -36,6 +36,7 @@ pub const W_CLEAN_PATTERN: f32 = 0.05;
 // own password history (seed_history_id is Some). Rewards candidates that are
 // mutations of real past passwords rather than pure synthesis.
 pub const W_HISTORY_SEED: f32 = 1.0;
+pub const W_HISTORY_DESCENDANT: f32 = 0.5;
 
 #[derive(Debug, Clone)]
 pub struct ScoreBreakdown {
@@ -47,6 +48,7 @@ pub struct ScoreBreakdown {
     pub orig_casing: f32,  pub orig_casing_weighted: f32,
     pub clean_pattern: f32, pub clean_pattern_weighted: f32,
     pub history_seed: f32, pub history_seed_weighted: f32,
+    pub history_descendant: f32, pub history_descendant_weighted: f32,
     pub multiplier: f32,
     pub total: f32,
 }
