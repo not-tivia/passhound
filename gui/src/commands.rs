@@ -1397,6 +1397,7 @@ pub struct ScoreBreakdownView {
     pub orig_casing: f32,  pub orig_casing_weighted: f32,
     pub clean_pattern: f32, pub clean_pattern_weighted: f32,
     pub history_seed: f32, pub history_seed_weighted: f32,
+    pub history_descendant: f32, pub history_descendant_weighted: f32,
     pub multiplier: f32,
     pub total: f32,
 }
@@ -1412,6 +1413,7 @@ impl From<&passhound_core::recovery::score::ScoreBreakdown> for ScoreBreakdownVi
             orig_casing: b.orig_casing, orig_casing_weighted: b.orig_casing_weighted,
             clean_pattern: b.clean_pattern, clean_pattern_weighted: b.clean_pattern_weighted,
             history_seed: b.history_seed, history_seed_weighted: b.history_seed_weighted,
+            history_descendant: b.history_descendant, history_descendant_weighted: b.history_descendant_weighted,
             multiplier: b.multiplier,
             total: b.total,
         }

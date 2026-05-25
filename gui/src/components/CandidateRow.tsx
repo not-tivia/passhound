@@ -183,6 +183,7 @@ export default function CandidateRow({
                   ["orig_casing",  bd.orig_casing,  bd.orig_casing_weighted],
                   ["clean_pat",    bd.clean_pattern, bd.clean_pattern_weighted],
                   ["history_seed", bd.history_seed, bd.history_seed_weighted],
+                  ["history_descendant", bd.history_descendant, bd.history_descendant_weighted],
                 ] as [string, number, number][]
               ).map(([name, raw, weighted]) => (
                 <tr key={name}>

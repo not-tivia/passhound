@@ -189,6 +189,7 @@ export interface ScoreBreakdown {
   orig_casing: number;       orig_casing_weighted: number;
   clean_pattern: number;     clean_pattern_weighted: number;
   history_seed: number;      history_seed_weighted: number;
+  history_descendant: number; history_descendant_weighted: number;
   multiplier: number;
   total: number;
 }
