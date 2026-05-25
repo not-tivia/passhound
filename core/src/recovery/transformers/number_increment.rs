@@ -1,7 +1,7 @@
 //! NumberIncrement — finds trailing numeric segments and shifts them; also appends top years.
 
 use crate::recovery::transformers::Transformer;
-use crate::recovery::{Candidate, RecoverContext, RuleId};
+use crate::recovery::{child_provenance, Candidate, RecoverContext, RuleId};
 use chrono::Datelike;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -76,8 +76,7 @@ fn top_years(ctx: &RecoverContext<'_>, n: usize) -> Vec<u16> {
 }
 
 fn push(out: &mut Vec<Candidate>, parent: &Candidate, s: &str) {
-    let mut prov = parent.provenance.clone();
-    prov.push(RuleId::NumberIncrement);
+    let prov = child_provenance(parent, RuleId::NumberIncrement);
     out.push(Candidate {
         password: Zeroizing::new(s.to_string()),
         score: 0.0,
@@ -174,5 +173,31 @@ mod tests {
         assert!(strs.contains(&"plain2018".to_string()), "expected 'plain2018'; got {strs:?}");
         assert!(strs.contains(&"plain2019".to_string()), "expected 'plain2019'; got {strs:?}");
         assert!(strs.contains(&"plain2020".to_string()), "expected 'plain2020'; got {strs:?}");
+    }
+
+    #[test]
+    fn number_increment_propagates_history_descendant_through_chain() {
+        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let parent = Candidate {
+            password: Zeroizing::new("pw2019".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let children = NumberIncrement.transform(&parent, &rc(&p, &s, &c));
+        assert!(!children.is_empty(), "NumberIncrement on pw2019 should produce at least one child");
+        for child in &children {
+            assert!(!child.provenance.contains(&RuleId::HistorySeed),
+                "HistorySeed must be replaced with HistoryDescendant in transformed child");
+            assert!(child.provenance.contains(&RuleId::HistoryDescendant),
+                "child must carry HistoryDescendant");
+            assert!(child.provenance.contains(&RuleId::NumberIncrement),
+                "child must include the transformer's RuleId");
+            assert_eq!(child.seed_history_id, Some(1),
+                "seed_history_id must propagate from parent");
+        }
     }
 }

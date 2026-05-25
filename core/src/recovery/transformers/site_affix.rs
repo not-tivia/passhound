@@ -1,7 +1,7 @@
 //! SiteAffix — prepends/appends site abbreviations.
 
 use crate::recovery::transformers::Transformer;
-use crate::recovery::{Candidate, RecoverContext, RuleId};
+use crate::recovery::{child_provenance, Candidate, RecoverContext, RuleId};
 use zeroize::Zeroizing;
 
 pub struct SiteAffix;
@@ -41,8 +41,7 @@ impl Transformer for SiteAffix {
 }
 
 fn push(out: &mut Vec<Candidate>, parent: &Candidate, s: &str, is_original: bool) {
-    let mut prov = parent.provenance.clone();
-    prov.push(RuleId::SiteAffix);
+    let mut prov = child_provenance(parent, RuleId::SiteAffix);
     if is_original && !prov.contains(&RuleId::OriginalCasing) {
         prov.push(RuleId::OriginalCasing);
     }

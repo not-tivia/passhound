@@ -1,7 +1,7 @@
 //! CaseVariations — emits lower / UPPER / TitleCase / cAmElCaSe of input.
 
 use crate::recovery::transformers::Transformer;
-use crate::recovery::{Candidate, RecoverContext, RuleId};
+use crate::recovery::{child_provenance, Candidate, RecoverContext, RuleId};
 use zeroize::Zeroizing;
 
 pub struct CaseVariations;
@@ -27,8 +27,7 @@ impl Transformer for CaseVariations {
 }
 
 fn make_child(parent: &Candidate, s: String) -> Candidate {
-    let mut prov = parent.provenance.clone();
-    prov.push(RuleId::CaseVariations);
+    let prov = child_provenance(parent, RuleId::CaseVariations);
     Candidate {
         password: Zeroizing::new(s),
         score: 0.0,

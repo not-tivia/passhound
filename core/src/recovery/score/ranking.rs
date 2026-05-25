@@ -2,7 +2,8 @@
 
 use crate::recovery::clean_pattern;
 use crate::recovery::score::{
-    W_CLEAN_PATTERN, W_FAV_BASE, W_FREQ, W_HINT, W_HISTORY_SEED, W_LEN, W_ORIG_CASING, W_SITE,
+    W_CLEAN_PATTERN, W_FAV_BASE, W_FREQ, W_HINT, W_HISTORY_DESCENDANT, W_HISTORY_SEED, W_LEN,
+    W_ORIG_CASING, W_SITE,
 };
 use crate::recovery::stats::{count_trailing_digits, trailing_year};
 use crate::recovery::{Candidate, RecoverContext, RuleId};
@@ -53,6 +54,7 @@ pub fn score_with_breakdown(
     let len  = length_match(c, ctx);
     let orig = if c.provenance.contains(&RuleId::OriginalCasing) { 1.0 } else { 0.0 };
     let history_seed = if c.provenance.contains(&RuleId::HistorySeed) { 1.0 } else { 0.0 };
+    let history_descendant = if c.provenance.contains(&RuleId::HistoryDescendant) { 1.0 } else { 0.0 };
 
     // Clean-pattern bonus (Phase 3.8 + 3.9): additive bonus scaled by the
     // count of DISTINCT segment types in the decomposition. Returns 0..=4:
@@ -77,10 +79,11 @@ pub fn score_with_breakdown(
     let orig_casing_weighted  = W_ORIG_CASING   * orig;
     let clean_pattern_weighted = W_CLEAN_PATTERN * clean_pattern;
     let history_seed_weighted = W_HISTORY_SEED  * history_seed;
+    let history_descendant_weighted = W_HISTORY_DESCENDANT * history_descendant;
 
     let mut total = site_weighted + hint_weighted + freq_weighted + fav_weighted
         + len_weighted + orig_casing_weighted + clean_pattern_weighted
-        + history_seed_weighted;
+        + history_seed_weighted + history_descendant_weighted;
 
     let multiplier = match multipliers {
         None => 1.0,
@@ -103,7 +106,7 @@ pub fn score_with_breakdown(
         orig_casing: orig, orig_casing_weighted,
         clean_pattern, clean_pattern_weighted,
         history_seed, history_seed_weighted,
-        history_descendant: 0.0, history_descendant_weighted: 0.0,
+        history_descendant, history_descendant_weighted,
         multiplier,
         total,
     };
@@ -451,5 +454,78 @@ mod tests {
         assert_eq!(breakdown.history_seed, 1.0, "history_seed raw factor should be 1.0 for HistorySeed provenance");
         assert!((breakdown.history_seed_weighted - 1.0).abs() < 1e-6, "history_seed_weighted = W_HISTORY_SEED (1.0) when present");
         assert_eq!(breakdown.orig_casing, 1.0, "orig_casing raw should be 1.0 for OriginalCasing in provenance");
+    }
+
+    #[test]
+    fn history_descendant_scores_between_synthesized_and_history_seed() {
+        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let seed = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let descendant = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistoryDescendant, RuleId::NumberIncrement],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let synthesized = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::BaseWordPool],
+            seed_history_id: None,
+            breakdown: None,
+        };
+        let s_seed = score(&seed, &rc, None);
+        let s_desc = score(&descendant, &rc, None);
+        let s_synth = score(&synthesized, &rc, None);
+        assert!(s_seed > s_desc, "history seed must outscore descendant: seed={s_seed} desc={s_desc}");
+        assert!(s_desc > s_synth, "descendant must outscore synthesized: desc={s_desc} synth={s_synth}");
+    }
+
+    #[test]
+    fn score_with_breakdown_history_descendant_field_populated() {
+        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("x".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistoryDescendant, RuleId::NumberIncrement],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let (_, breakdown) = score_with_breakdown(&cand, &rc, None);
+        assert_eq!(breakdown.history_descendant, 1.0);
+        assert!((breakdown.history_descendant_weighted - 0.5).abs() < 1e-6,
+            "history_descendant_weighted = W_HISTORY_DESCENDANT (0.5) when present");
+        assert_eq!(breakdown.history_seed, 0.0,
+            "candidate with HistoryDescendant but not HistorySeed should report history_seed = 0");
+    }
+
+    #[test]
+    fn score_with_breakdown_no_history_lineage_zero_descendant() {
+        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("x".into()),
+            score: 0.0,
+            provenance: vec![RuleId::BaseWordPool],
+            seed_history_id: None,
+            breakdown: None,
+        };
+        let (_, breakdown) = score_with_breakdown(&cand, &rc, None);
+        assert_eq!(breakdown.history_descendant, 0.0);
+        assert_eq!(breakdown.history_descendant_weighted, 0.0);
     }
 }

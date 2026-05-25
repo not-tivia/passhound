@@ -1,7 +1,7 @@
 //! LeetSwap — applies leet-speak character substitutions.
 
 use crate::recovery::transformers::Transformer;
-use crate::recovery::{Candidate, RecoverContext, RuleId};
+use crate::recovery::{child_provenance, Candidate, RecoverContext, RuleId};
 use zeroize::Zeroizing;
 
 pub struct LeetSwap;
@@ -70,8 +70,7 @@ fn swap_single(s: &str, target: char, replacement: char) -> String {
 }
 
 fn push(out: &mut Vec<Candidate>, parent: &Candidate, s: &str) {
-    let mut prov = parent.provenance.clone();
-    prov.push(RuleId::LeetSwap);
+    let prov = child_provenance(parent, RuleId::LeetSwap);
     out.push(Candidate {
         password: Zeroizing::new(s.to_string()),
         score: 0.0,

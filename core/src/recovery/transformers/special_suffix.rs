@@ -1,7 +1,7 @@
 //! SpecialSuffix — appends symbol suffixes; stats-aware.
 
 use crate::recovery::transformers::Transformer;
-use crate::recovery::{Candidate, RecoverContext, RuleId};
+use crate::recovery::{child_provenance, Candidate, RecoverContext, RuleId};
 use zeroize::Zeroizing;
 
 pub struct SpecialSuffix;
@@ -37,8 +37,7 @@ impl Transformer for SpecialSuffix {
 }
 
 fn push_child(out: &mut Vec<Candidate>, parent: &Candidate, s: &str) {
-    let mut prov = parent.provenance.clone();
-    prov.push(RuleId::SpecialSuffix);
+    let prov = child_provenance(parent, RuleId::SpecialSuffix);
     out.push(Candidate {
         password: Zeroizing::new(s.to_string()),
         score: 0.0,
