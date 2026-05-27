@@ -4,15 +4,15 @@ A local, encrypted, offline personal password vault and recovery tool. Argon2id 
 
 ## Download
 
-Latest release: **[v1.7.1](https://github.com/not-tivia/passhound/releases/latest)**
+Latest release: **[v1.7.2](https://github.com/not-tivia/passhound/releases/latest)**
 
 | File | Platform |
 |---|---|
-| `PassHound_1.7.1_x64_en-US.msi` | Windows (MSI installer) |
-| `PassHound_1.7.1_x64-setup.exe` | Windows (NSIS installer) |
-| `PassHound_1.7.1_amd64.deb` | Linux Debian/Ubuntu |
-| `PassHound-1.7.1-1.x86_64.rpm` | Linux Fedora/RHEL |
-| `PassHound_1.7.1_amd64.AppImage` | Linux portable |
+| `PassHound_1.7.2_x64_en-US.msi` | Windows (MSI installer) |
+| `PassHound_1.7.2_x64-setup.exe` | Windows (NSIS installer) |
+| `PassHound_1.7.2_amd64.deb` | Linux Debian/Ubuntu |
+| `PassHound-1.7.2-1.x86_64.rpm` | Linux Fedora/RHEL |
+| `PassHound_1.7.2_amd64.AppImage` | Linux portable |
 
 Source tarball and the CLI binary can be built locally — see Quick start below.
 
