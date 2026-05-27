@@ -53,8 +53,22 @@ pub fn score_with_breakdown(
     let fav  = if contains_any_favorite(c, ctx) { 1.0 } else { 0.0 };
     let len  = length_match(c, ctx);
     let orig = if c.provenance.contains(&RuleId::OriginalCasing) { 1.0 } else { 0.0 };
-    let history_seed = if c.provenance.contains(&RuleId::HistorySeed) { 1.0 } else { 0.0 };
-    let history_descendant = if c.provenance.contains(&RuleId::HistoryDescendant) { 1.0 } else { 0.0 };
+
+    // Phase 4.21: history bonuses are scaled by the seed's site_match_strength
+    // (1.0 exact-site match, 0.5 same-category fallback, 0.5 default when no
+    // pool seed is found). Without this scaling, a wrong-site historical
+    // password admitted via same-category fallback would get a flat +1.0
+    // bonus that dwarfs the W_SITE = 0.30 discriminator, causing unrelated
+    // history to crowd out right-site synthesis. HistorySeed and
+    // HistoryDescendant are mutually exclusive: dedup_exact can union a
+    // raw seed's provenance with a transformer child that produced an
+    // identical plaintext, leaving both rules on one candidate; only the
+    // stronger HistorySeed counts.
+    let history_strength = site_seed.unwrap_or(0.5);
+    let has_seed = c.provenance.contains(&RuleId::HistorySeed);
+    let has_descendant = c.provenance.contains(&RuleId::HistoryDescendant);
+    let history_seed = if has_seed { history_strength } else { 0.0 };
+    let history_descendant = if has_descendant && !has_seed { history_strength } else { 0.0 };
 
     // Clean-pattern bonus (Phase 3.8 + 3.9): additive bonus scaled by the
     // count of DISTINCT segment types in the decomposition. Returns 0..=4:
@@ -435,7 +449,7 @@ mod tests {
 
     #[test]
     fn score_with_breakdown_returns_total_equal_to_score() {
-        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        let p = pool_with_seed_strength(1.0);
         let s = HistoryStats::default();
         let mut c = RecoverConfig::default();
         c.hint = Some("xyz".into());
@@ -492,7 +506,8 @@ mod tests {
 
     #[test]
     fn score_with_breakdown_history_descendant_field_populated() {
-        let p = Pool { seeds: vec![], favorite_base_words: vec![], all_base_words: vec![], site_abbreviations: vec![], era_window: None };
+        // Pool seed at full site_match_strength = 1.0 so raw factor delivers full credit.
+        let p = pool_with_seed_strength(1.0);
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
@@ -527,5 +542,160 @@ mod tests {
         let (_, breakdown) = score_with_breakdown(&cand, &rc, None);
         assert_eq!(breakdown.history_descendant, 0.0);
         assert_eq!(breakdown.history_descendant_weighted, 0.0);
+    }
+
+    // Phase 4.21 ---------------------------------------------------------------
+
+    fn pool_with_seed_strength(strength: f32) -> Pool {
+        Pool {
+            seeds: vec![PoolSeed {
+                history_id: 1,
+                plaintext: Zeroizing::new("x".into()),
+                created_at: Utc::now(),
+                site_id: Some(1),
+                site_match_strength: strength,
+            }],
+            favorite_base_words: vec![],
+            all_base_words: vec![],
+            site_abbreviations: vec![],
+            era_window: None,
+        }
+    }
+
+    #[test]
+    fn wrong_site_history_seed_gets_half_bonus() {
+        // Same-category fallback in the pool: seed has site_match_strength=0.5.
+        // The history bonus should scale with it, not deliver full +1.0.
+        let p = pool_with_seed_strength(0.5);
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&cand, &rc, None);
+        assert!((bd.history_seed - 0.5).abs() < 1e-6,
+            "raw history_seed should equal site_match_strength (0.5), got {}", bd.history_seed);
+        assert!((bd.history_seed_weighted - 0.5).abs() < 1e-6,
+            "history_seed_weighted should be W_HISTORY_SEED * 0.5 = 0.5, got {}", bd.history_seed_weighted);
+    }
+
+    #[test]
+    fn right_site_history_seed_gets_full_bonus() {
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&cand, &rc, None);
+        assert!((bd.history_seed - 1.0).abs() < 1e-6);
+        assert!((bd.history_seed_weighted - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn wrong_site_history_descendant_gets_quarter_bonus() {
+        // site_match_strength=0.5 × W_HISTORY_DESCENDANT (0.5) = 0.25
+        let p = pool_with_seed_strength(0.5);
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistoryDescendant, RuleId::NumberIncrement],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&cand, &rc, None);
+        assert!((bd.history_descendant - 0.5).abs() < 1e-6,
+            "raw history_descendant should equal site_match_strength (0.5), got {}", bd.history_descendant);
+        assert!((bd.history_descendant_weighted - 0.25).abs() < 1e-6,
+            "history_descendant_weighted should be 0.5 * 0.5 = 0.25, got {}", bd.history_descendant_weighted);
+    }
+
+    #[test]
+    fn dedup_collision_does_not_double_count_history() {
+        // dedup_exact can union provenances when a transformer child equals a
+        // verbatim seed, producing a single candidate carrying BOTH HistorySeed
+        // and HistoryDescendant. The scorer must treat them as mutually
+        // exclusive: only HistorySeed counts.
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed, RuleId::HistoryDescendant, RuleId::CaseVariations],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&cand, &rc, None);
+        assert!((bd.history_seed - 1.0).abs() < 1e-6, "HistorySeed should count fully");
+        assert_eq!(bd.history_descendant, 0.0,
+            "HistoryDescendant must be suppressed when HistorySeed is also present");
+        assert_eq!(bd.history_descendant_weighted, 0.0);
+    }
+
+    #[test]
+    fn wrong_site_seed_does_not_outrank_right_site_synthesis() {
+        // The user-reported bug: querying Tumblr, RuneScape historical passwords
+        // (admitted to the pool via same-category fallback at strength=0.5) get
+        // a flat +1.0 history bonus and crowd out actual Tumblr-relevant
+        // synthesis. After Phase 4.21 site-scaling, a synthesized candidate
+        // that genuinely matches the queried site + favorite + hint should
+        // beat a wrong-site historical seed.
+        let p = Pool {
+            seeds: vec![PoolSeed {
+                history_id: 1,
+                plaintext: Zeroizing::new("OldGame123".into()),
+                created_at: Utc::now(),
+                site_id: Some(99),
+                site_match_strength: 0.5, // same-category fallback
+            }],
+            favorite_base_words: vec![DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("fluffy".into()),
+                original: Zeroizing::new("Fluffy".into()),
+            }],
+            all_base_words: vec![DecryptedBaseWordEntry {
+                canonical: Zeroizing::new("fluffy".into()),
+                original: Zeroizing::new("Fluffy".into()),
+            }],
+            site_abbreviations: vec!["Tm".into()],
+            era_window: None,
+        };
+        let s = HistoryStats::default();
+        let mut c = RecoverConfig::default();
+        c.site = Some("Tumblr".into());
+        c.hint = Some("fluffy".into());
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let wrong_site_seed = Candidate {
+            password: Zeroizing::new("OldGame123".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let right_site_synth = Candidate {
+            password: Zeroizing::new("Fluffy$2014Tm".into()),
+            score: 0.0,
+            provenance: vec![RuleId::BaseWordPool, RuleId::SpecialSuffix, RuleId::NumberIncrement, RuleId::SiteAffix, RuleId::OriginalCasing],
+            seed_history_id: None,
+            breakdown: None,
+        };
+        let s_wrong = score(&wrong_site_seed, &rc, None);
+        let s_right = score(&right_site_synth, &rc, None);
+        assert!(s_right > s_wrong,
+            "right-site synthesis must outrank wrong-site historical seed; got synth={s_right} wrong_seed={s_wrong}");
     }
 }
