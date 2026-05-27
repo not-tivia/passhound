@@ -4,7 +4,6 @@ use crate::recovery::{Pool, PoolSeed, RecoverConfig};
 use crate::repo::{base_words, eras};
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
-use rusqlite::params;
 use serde_json;
 use zeroize::Zeroizing;
 
@@ -50,43 +49,53 @@ pub fn build(vault: &Vault, cfg: &RecoverConfig) -> Result<Pool> {
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
 
     // Determine the matched site set (for category fallback) when --site is given.
-    let target_site_lower = cfg.site.as_ref().map(|s| s.to_lowercase());
+    // Canonicalize so URL-shaped stored names ("https://www.github.com") match a
+    // user-typed bare target ("github").
+    let target_site_canonical = cfg.site.as_ref().map(|s| canonical_site_name(s));
     let target_account_lower = cfg.account.as_ref().map(|s| s.to_lowercase());
 
-    // First pass: identify the primary matched-site category, if any. Query the
-    // sites table directly (not the JOIN above) so a name-matched site with no
-    // password rows still contributes its category to the same-category fallback.
-    let primary_category: Option<String> = if let Some(target) = &cfg.site {
+    // First pass: identify the primary matched-site category, if any. Scan the
+    // sites table and compare canonical names in Rust — SQL's LOWER() alone
+    // can't strip URL noise, and a name-matched site with no password rows
+    // still needs to contribute its category to the same-category fallback.
+    let primary_category: Option<String> = if let Some(target_canonical) = &target_site_canonical {
         let mut stmt = vault.conn().prepare(
-            "SELECT category FROM sites WHERE LOWER(name) = LOWER(?1) LIMIT 1",
+            "SELECT name, category FROM sites",
         )?;
-        stmt.query_row(params![target], |r| r.get::<_, Option<String>>(0))
-            .ok()
-            .flatten()
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        let mut found: Option<String> = None;
+        for row in rows {
+            let (name, category) = row?;
+            if canonical_site_name(&name) == *target_canonical {
+                found = category;
+                break;
+            }
+        }
+        found
     } else {
         None
     };
-    // Used by the per-row site classification below.
-    let _ = &target_site_lower;
-
     let mut seeds: Vec<PoolSeed> = Vec::new();
     let mut site_abbrev_set: Vec<String> = Vec::new();
 
-    // P3: pull abbreviations from any sites row whose name matches cfg.site
-    // (case-insensitive), independent of whether any password rows from that
-    // site survive the era + decrypt pipeline. This catches the case where
-    // the answer site exists in `sites` but its passwords are excluded
-    // (era-filtered or otherwise) — its declared abbreviations are the
-    // exact ones the user uses for that site.
-    if let Some(target) = &cfg.site {
+    // P3: pull abbreviations from any sites row whose canonical name matches
+    // cfg.site, independent of whether any password rows from that site survive
+    // the era + decrypt pipeline. This catches the case where the answer site
+    // exists in `sites` but its passwords are excluded (era-filtered or
+    // otherwise) — its declared abbreviations are the exact ones the user uses
+    // for that site.
+    if let Some(target_canonical) = &target_site_canonical {
         let mut stmt = vault.conn().prepare(
-            "SELECT abbreviations FROM sites WHERE LOWER(name) = LOWER(?1)",
+            "SELECT name, abbreviations FROM sites",
         )?;
-        let rows: Vec<String> = stmt
-            .query_map(params![target], |r| r.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        for abbr_json in rows {
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for row in rows.flatten() {
+            let (name, abbr_json) = row;
+            if canonical_site_name(&name) != *target_canonical { continue; }
             let abbreviations: Vec<String> = serde_json::from_str(&abbr_json).unwrap_or_default();
             for a in abbreviations {
                 if !site_abbrev_set.iter().any(|x| x.eq_ignore_ascii_case(&a)) {
@@ -114,11 +123,11 @@ pub fn build(vault: &Vault, cfg: &RecoverConfig) -> Result<Pool> {
 
         // Site classification.
         let abbreviations: Vec<String> = serde_json::from_str(&abbr_json).unwrap_or_default();
-        let site_match_strength: f32 = match &target_site_lower {
+        let site_match_strength: f32 = match &target_site_canonical {
             None => 0.5,
-            Some(target) => {
-                let name_match = site_name.to_lowercase() == *target;
-                let abbrev_match = abbreviations.iter().any(|a| a.to_lowercase() == *target);
+            Some(target_canonical) => {
+                let name_match = canonical_site_name(&site_name) == *target_canonical;
+                let abbrev_match = abbreviations.iter().any(|a| a.to_lowercase() == *target_canonical);
                 if name_match || abbrev_match {
                     1.0
                 } else if let (Some(c), Some(p)) = (category.as_deref(), primary_category.as_deref()) {
@@ -193,14 +202,77 @@ pub fn build(vault: &Vault, cfg: &RecoverConfig) -> Result<Pool> {
     })
 }
 
+/// Strip URL noise from a site name while preserving original case.
+///
+/// Handles two URL families:
+/// - Standard web: removes `http(s)://`, path/query/fragment, port, `www.`,
+///   and the trailing TLD segment.
+/// - Google Password Manager Android entries (`android://<cert>==@<pkg>/`):
+///   extracts the package brand segment (e.g. `com.tumblr` -> `tumblr`,
+///   `com.jagex.oldscape.android` -> `jagex`).
+///
+/// "https://www.GitHub.com"                   -> "GitHub"
+/// "https://www.amazon.co/login"              -> "amazon"
+/// "github.com:8080"                          -> "github"
+/// "android://abc==@com.tumblr/"              -> "tumblr"
+/// "android://xyz==@com.jagex.oldscape.android/" -> "jagex"
+/// "  Tumblr  "                               -> "Tumblr"
+pub fn strip_url_noise(name: &str) -> String {
+    let s = name.trim();
+
+    // Google Password Manager Android entries:
+    //   android://<base64 cert hash>==@<reverse-dns package name>/
+    // We discard the cert hash entirely and reduce the package to the brand
+    // segment by dropping a leading common-org TLD (com./org./io./net./co./
+    // app./me.) and taking the next segment.
+    if let Some(rest) = s.strip_prefix("android://") {
+        let pkg = rest.split('@').nth(1).unwrap_or("");
+        let pkg = pkg.split('/').next().unwrap_or("");
+        let segments: Vec<&str> = pkg.split('.').filter(|s| !s.is_empty()).collect();
+        return match segments.as_slice() {
+            [first, second, ..] if is_org_tld(first) => second.to_string(),
+            [only] => only.to_string(),
+            [first, ..] => first.to_string(),
+            _ => String::new(),
+        };
+    }
+
+    let s = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
+    let s = s.split(['/', '?', '#']).next().unwrap_or("");
+    let s = s.split(':').next().unwrap_or("");
+    let s = if s.len() >= 4 && s[..4].eq_ignore_ascii_case("www.") { &s[4..] } else { s };
+    match s.rsplit_once('.') {
+        Some((root, _tld)) if !root.is_empty() => root.to_string(),
+        _ => s.to_string(),
+    }
+}
+
+fn is_org_tld(s: &str) -> bool {
+    matches!(
+        s.to_lowercase().as_str(),
+        "com" | "org" | "io" | "net" | "co" | "app" | "me" | "edu" | "gov" | "info"
+    )
+}
+
+/// Canonical lowercase form for site-name equality comparison.
+pub fn canonical_site_name(name: &str) -> String {
+    strip_url_noise(name).to_lowercase()
+}
+
 /// Derive plausible abbreviations from a site name. Conservative — never panics.
-/// "RuneScape"   -> ["RS", "Run"]
-/// "Amazon"      -> ["AM", "Ama"]
-/// "GitHub"      -> ["GH", "Git"]
-/// "google"      -> ["GO", "goo"]
+/// URL noise is stripped first so e.g. "https://www.github.com" produces
+/// ["G", "Git"] rather than ["Htt"]. Case is preserved through the strip so
+/// camel-case boundary acronym detection still works on names like "GitHub".
+/// "RuneScape"               -> ["RS", "Run"]
+/// "Amazon"                  -> ["AM", "Ama"]
+/// "GitHub"                  -> ["GH", "Git"]
+/// "google"                  -> ["G", "goo"]
+/// "https://www.github.com"  -> ["G", "Git"]
+/// "https://www.GitHub.com"  -> ["GH", "Git"]
 pub fn derive_abbreviations(name: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let trimmed = name.trim();
+    let stripped = strip_url_noise(name);
+    let trimmed = stripped.trim();
     if trimmed.is_empty() { return out; }
 
     // First letters of each "word" segment (split on whitespace, dashes, underscores,
@@ -266,6 +338,105 @@ mod tests {
     #[test]
     fn derive_abbreviations_empty_input() {
         assert!(derive_abbreviations("   ").is_empty());
+    }
+
+    // Phase 4.22 ---------------------------------------------------------------
+
+    #[test]
+    fn strip_url_noise_full_url() {
+        assert_eq!(strip_url_noise("https://www.github.com"), "github");
+        assert_eq!(strip_url_noise("http://github.com"), "github");
+        assert_eq!(strip_url_noise("https://www.github.com/login?next=/"), "github");
+        assert_eq!(strip_url_noise("github.com:8080"), "github");
+    }
+
+    #[test]
+    fn strip_url_noise_preserves_case() {
+        assert_eq!(strip_url_noise("https://www.GitHub.com"), "GitHub");
+        assert_eq!(strip_url_noise("  GitHub  "), "GitHub");
+    }
+
+    #[test]
+    fn strip_url_noise_idempotent_on_bare_names() {
+        assert_eq!(strip_url_noise("RuneScape"), "RuneScape");
+        assert_eq!(strip_url_noise("Amazon"), "Amazon");
+    }
+
+    #[test]
+    fn canonical_site_name_lowercases() {
+        assert_eq!(canonical_site_name("https://www.GitHub.com"), "github");
+        assert_eq!(canonical_site_name("GitHub"), "github");
+        assert_eq!(canonical_site_name("Tumblr"), "tumblr");
+    }
+
+    #[test]
+    fn derive_abbreviations_full_url_no_protocol_leak() {
+        // The user-reported bug: "https://www.github.com" produced ["Htt"]
+        // because the first 3 alnum chars of the raw URL were "htt". After
+        // URL noise stripping it should produce GitHub-flavored abbreviations.
+        let abbrs = derive_abbreviations("https://www.github.com");
+        assert!(!abbrs.iter().any(|a| a.eq_ignore_ascii_case("Htt")),
+            "abbreviations must not leak the URL protocol prefix; got {:?}", abbrs);
+        assert!(abbrs.iter().any(|a| a.eq_ignore_ascii_case("Git")),
+            "expected Git-prefix abbreviation from github.com; got {:?}", abbrs);
+    }
+
+    #[test]
+    fn derive_abbreviations_url_preserves_camel_acronym() {
+        // "GitHub.com" (or with URL prefix) should still produce "GH" via the
+        // camel-case boundary path, because strip_url_noise preserves case.
+        let abbrs = derive_abbreviations("https://www.GitHub.com");
+        assert!(abbrs.iter().any(|a| a == "GH"),
+            "expected GH camel-acronym from GitHub URL; got {:?}", abbrs);
+    }
+
+    #[test]
+    fn strip_url_noise_android_package_brand() {
+        // Google Password Manager Android entries — extract the brand segment
+        // from the reverse-dns package name, discarding the cert hash entirely.
+        assert_eq!(
+            strip_url_noise("android://abc123==@com.tumblr/"),
+            "tumblr",
+        );
+        assert_eq!(
+            strip_url_noise("android://xyz==@com.jagex.oldscape.android/"),
+            "jagex",
+        );
+        assert_eq!(
+            strip_url_noise("android://hash==@com.snapchat.android/"),
+            "snapchat",
+        );
+        assert_eq!(
+            strip_url_noise("android://hash==@org.mozilla.firefox/"),
+            "mozilla",
+        );
+    }
+
+    #[test]
+    fn derive_abbreviations_android_url() {
+        // The user-reported bug v2: android:// URLs produced abbreviations
+        // derived from "and" (first 3 chars of "android://...") — same class
+        // of leak as Htt from https://. After strip_url_noise these should
+        // produce brand-name abbreviations.
+        let abbrs = derive_abbreviations("android://abc==@com.tumblr/");
+        assert!(!abbrs.iter().any(|a| a.eq_ignore_ascii_case("And")),
+            "abbreviations must not leak the android:// prefix; got {:?}", abbrs);
+        assert!(abbrs.iter().any(|a| a.eq_ignore_ascii_case("Tum")),
+            "expected Tum-prefix abbreviation from com.tumblr; got {:?}", abbrs);
+    }
+
+    #[test]
+    fn canonical_site_name_android_matches_brand_query() {
+        // A user-typed query "tumblr" should match a stored
+        // "android://hash==@com.tumblr/" via canonical_site_name equality.
+        assert_eq!(
+            canonical_site_name("android://abc==@com.tumblr/"),
+            canonical_site_name("Tumblr"),
+        );
+        assert_eq!(
+            canonical_site_name("android://abc==@com.snapchat.android/"),
+            canonical_site_name("Snapchat"),
+        );
     }
 
     #[test]
