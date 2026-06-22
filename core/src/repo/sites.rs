@@ -1,9 +1,107 @@
 use crate::error::{Error, Result};
 use crate::repo::common;
+use crate::site_name::{canonical_site_name, strip_url_noise};
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+const URL_CLEANUP_KEY: &str = "url_cleanup_v1";
+
+#[derive(Debug, Clone, Default)]
+pub struct CleanupReport {
+    pub renamed: usize,
+    pub skipped_collisions: usize,
+}
+
+/// One-shot data migration that rewrites URL-shaped values in `sites.name`
+/// to their bare-brand canonical form (via `strip_url_noise`). Idempotent —
+/// a `url_cleanup_v1` flag in `vault_meta` records completion so subsequent
+/// vault opens are no-ops.
+///
+/// Conflict handling: if rewriting row A would collide with an existing row B
+/// (same canonical name), row A is left untouched and counted as skipped.
+/// The user can manually merge later.
+///
+/// Preserves the original URL on each rewritten row: if `sites.url` is NULL
+/// or empty, the original `name` is copied into `url` so the URL information
+/// is not lost.
+///
+/// Takes a `&Connection` (not `&Vault`) so it can run inside the same
+/// transaction as `schema::apply_migrations` during `Vault::open`.
+pub fn cleanup_url_shaped_site_names(conn: &Connection) -> Result<CleanupReport> {
+    let done: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![URL_CLEANUP_KEY],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if done.is_some() {
+        return Ok(CleanupReport::default());
+    }
+
+    let mut stmt = conn.prepare("SELECT id, name, url FROM sites")?;
+    let rows: Vec<(i64, String, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    // canonical -> count of rows currently claiming it. Used to detect
+    // collisions both pre-existing (multiple rows already canonicalize to
+    // the same brand — leave them alone, let the user merge manually) and
+    // newly-created (a rename would land on a slot claimed by another row).
+    let mut taken: HashMap<String, usize> = HashMap::new();
+    for (_, n, _) in &rows {
+        *taken.entry(canonical_site_name(n)).or_insert(0) += 1;
+    }
+
+    let mut renamed = 0usize;
+    let mut skipped = 0usize;
+    for (id, current_name, current_url) in &rows {
+        let proposed = strip_url_noise(current_name);
+        if proposed == *current_name || proposed.is_empty() {
+            continue;
+        }
+        let current_canonical = canonical_site_name(current_name);
+        let proposed_canonical = canonical_site_name(&proposed);
+        let collision = if proposed_canonical == current_canonical {
+            // Rename is canonical-preserving. Skip only if there's already
+            // ANOTHER row sharing this canonical (count > 1) — that pre-existing
+            // duplicate signals the user has manual cleanup to do.
+            taken.get(&current_canonical).copied().unwrap_or(0) > 1
+        } else {
+            // Rename moves to a different canonical. Skip if that slot is
+            // already claimed by any row.
+            taken.get(&proposed_canonical).copied().unwrap_or(0) > 0
+        };
+        if collision {
+            skipped += 1;
+            continue;
+        }
+        let new_url: Option<String> = match current_url.as_deref() {
+            Some(s) if !s.trim().is_empty() => current_url.clone(),
+            _ => Some(current_name.clone()),
+        };
+        conn.execute(
+            "UPDATE sites SET name = ?1, url = ?2 WHERE id = ?3",
+            params![proposed, new_url, id],
+        )?;
+        renamed += 1;
+        if let Some(c) = taken.get_mut(&current_canonical) { *c -= 1; }
+        *taken.entry(proposed_canonical).or_insert(0) += 1;
+    }
+
+    conn.execute(
+        "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![URL_CLEANUP_KEY, b"done".to_vec()],
+    )?;
+
+    Ok(CleanupReport { renamed, skipped_collisions: skipped })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Site {
@@ -216,6 +314,157 @@ mod tests {
         assert_eq!(got.category.as_deref(), Some("MMO"));
         assert_eq!(got.abbreviations, vec!["RSC".to_string(), "rs07".to_string()]);
         assert_eq!(got.notes.as_deref(), Some("legacy account"));
+    }
+
+    // Phase 4.23 ---------------------------------------------------------------
+
+    fn raw_name(v: &Vault, id: i64) -> String {
+        v.conn().query_row(
+            "SELECT name FROM sites WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, String>(0),
+        ).unwrap()
+    }
+
+    fn raw_url(v: &Vault, id: i64) -> Option<String> {
+        v.conn().query_row(
+            "SELECT url FROM sites WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, Option<String>>(0),
+        ).unwrap()
+    }
+
+    fn clear_cleanup_flag(v: &Vault) {
+        v.conn().execute(
+            "DELETE FROM vault_meta WHERE key = ?1",
+            params![URL_CLEANUP_KEY],
+        ).unwrap();
+    }
+
+    #[test]
+    fn cleanup_rewrites_url_shaped_names_and_preserves_original_in_url() {
+        let (_tmp, v) = vault();
+        // Fresh vault already ran cleanup at create — clear the flag so the
+        // test exercises a non-trivial pass.
+        clear_cleanup_flag(&v);
+        let s = create(&v, NewSite {
+            name: "https://www.github.com".into(),
+            url: None,
+            ..Default::default()
+        }).unwrap();
+        let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
+        assert_eq!(report.renamed, 1);
+        assert_eq!(report.skipped_collisions, 0);
+        assert_eq!(raw_name(&v, s.id), "github");
+        // Original URL form preserved in the url column.
+        assert_eq!(raw_url(&v, s.id).as_deref(), Some("https://www.github.com"));
+    }
+
+    #[test]
+    fn cleanup_handles_android_packages() {
+        let (_tmp, v) = vault();
+        clear_cleanup_flag(&v);
+        let s1 = create(&v, NewSite {
+            name: "android://abc==@com.tumblr/".into(), ..Default::default()
+        }).unwrap();
+        let s2 = create(&v, NewSite {
+            name: "android://xyz==@com.jagex.oldscape.android/".into(), ..Default::default()
+        }).unwrap();
+        let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
+        assert_eq!(report.renamed, 2);
+        assert_eq!(raw_name(&v, s1.id), "tumblr");
+        assert_eq!(raw_name(&v, s2.id), "jagex");
+    }
+
+    #[test]
+    fn cleanup_skips_collisions() {
+        // Both "https://www.github.com" and a separate "github" exist. Rewriting
+        // the URL row would collide with the bare row — skip it.
+        let (_tmp, v) = vault();
+        clear_cleanup_flag(&v);
+        let url_row = create(&v, NewSite {
+            name: "https://www.github.com".into(), ..Default::default()
+        }).unwrap();
+        let bare_row = create(&v, NewSite {
+            name: "GitHub".into(), ..Default::default()
+        }).unwrap();
+        let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
+        assert_eq!(report.renamed, 0);
+        assert_eq!(report.skipped_collisions, 1);
+        // URL row left unchanged.
+        assert_eq!(raw_name(&v, url_row.id), "https://www.github.com");
+        // Bare row also untouched.
+        assert_eq!(raw_name(&v, bare_row.id), "GitHub");
+    }
+
+    #[test]
+    fn cleanup_is_idempotent_via_flag() {
+        let (_tmp, v) = vault();
+        clear_cleanup_flag(&v);
+        let s = create(&v, NewSite {
+            name: "https://www.github.com".into(), ..Default::default()
+        }).unwrap();
+        let first = cleanup_url_shaped_site_names(v.conn()).unwrap();
+        assert_eq!(first.renamed, 1);
+        // Second call sees the flag set, returns zeros without re-scanning.
+        let second = cleanup_url_shaped_site_names(v.conn()).unwrap();
+        assert_eq!(second.renamed, 0);
+        assert_eq!(second.skipped_collisions, 0);
+        // And the row stayed canonical.
+        assert_eq!(raw_name(&v, s.id), "github");
+    }
+
+    #[test]
+    fn cleanup_leaves_already_canonical_names_untouched() {
+        let (_tmp, v) = vault();
+        clear_cleanup_flag(&v);
+        let s = create(&v, NewSite {
+            name: "Tumblr".into(),
+            url: Some("https://tumblr.com".into()),
+            ..Default::default()
+        }).unwrap();
+        let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
+        assert_eq!(report.renamed, 0);
+        assert_eq!(report.skipped_collisions, 0);
+        assert_eq!(raw_name(&v, s.id), "Tumblr");
+        assert_eq!(raw_url(&v, s.id).as_deref(), Some("https://tumblr.com"));
+    }
+
+    #[test]
+    fn cleanup_does_not_clobber_existing_url() {
+        // If url column already has a value, the rewrite must NOT overwrite it.
+        let (_tmp, v) = vault();
+        clear_cleanup_flag(&v);
+        let s = create(&v, NewSite {
+            name: "https://www.github.com".into(),
+            url: Some("https://github.com/explicit-url".into()),
+            ..Default::default()
+        }).unwrap();
+        let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
+        assert_eq!(report.renamed, 1);
+        assert_eq!(raw_name(&v, s.id), "github");
+        // Existing url preserved, not replaced with the original name.
+        assert_eq!(raw_url(&v, s.id).as_deref(), Some("https://github.com/explicit-url"));
+    }
+
+    #[test]
+    fn cleanup_runs_automatically_during_vault_open() {
+        // Vault::create stamps the flag; reopening a vault with no URL-shaped
+        // rows must remain a no-op (flag is set, no scan).
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("v.db");
+        {
+            let v = Vault::create(&path, b"pw").unwrap();
+            create(&v, NewSite { name: "Tumblr".into(), ..Default::default() }).unwrap();
+        }
+        let v2 = Vault::open(&path).unwrap();
+        // Flag should still be set.
+        let val: Vec<u8> = v2.conn().query_row(
+            "SELECT value FROM vault_meta WHERE key = ?1",
+            params![URL_CLEANUP_KEY],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(val, b"done");
     }
 
     #[test]

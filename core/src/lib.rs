@@ -8,6 +8,7 @@ pub mod recovery;
 pub mod repo;
 pub mod schema;
 pub mod settings;
+pub mod site_name;
 pub mod vault;
 
 pub use error::{Error, Result};

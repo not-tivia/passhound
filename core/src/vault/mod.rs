@@ -61,6 +61,9 @@ impl Vault {
         let tx = conn.transaction()?;
         schema::apply_initial(&tx)?;
         schema::apply_migrations(&tx)?;
+        // Fresh vault has no sites yet, but we run cleanup so the
+        // url_cleanup_v1 flag is set — keeps the open path a no-op forever.
+        crate::repo::sites::cleanup_url_shaped_site_names(&tx)?;
         tx.execute(
             "INSERT INTO vault_meta (key, value) VALUES (?1, ?2)",
             params![META_SALT, salt.as_slice()],
@@ -93,6 +96,7 @@ impl Vault {
         )?;
         let tx = conn.unchecked_transaction()?;
         schema::apply_migrations(&tx)?;
+        crate::repo::sites::cleanup_url_shaped_site_names(&tx)?;
         tx.commit()?;
         chmod_journal_if_present(path);
         Ok(Self { conn, path: path.into(), key: None })
