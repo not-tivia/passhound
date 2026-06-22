@@ -384,6 +384,40 @@ mod tests {
         );
     }
 
+    // Phase 4.25 — canonicalizer redesign
+
+    #[test]
+    fn brand_is_rightmost_after_tld() {
+        assert_eq!(strip_url_noise("auth.riotgames.com"), "riotgames");
+        assert_eq!(strip_url_noise("na.account.amazon.com"), "amazon");
+        assert_eq!(strip_url_noise("oldschool.runescape.com"), "runescape");
+        assert_eq!(strip_url_noise("login.aol.com"), "aol");
+    }
+
+    #[test]
+    fn no_tld_keeps_brand() {
+        // No recognized TLD -> the rightmost segment IS the brand; don't eat it.
+        assert_eq!(strip_url_noise("us.battle"), "battle");
+        assert_eq!(strip_url_noise("eu.battle"), "battle");
+        assert_eq!(strip_url_noise("account.battleon"), "battleon");
+    }
+
+    #[test]
+    fn compound_tld_dropped() {
+        assert_eq!(strip_url_noise("amazon.co.uk"), "amazon");
+        assert_eq!(strip_url_noise("www.shop.example.com.au"), "example");
+    }
+
+    #[test]
+    fn canonical_unifies_spacing_and_subdomains() {
+        // The straggler the merge missed: spaced name vs subdomained URL.
+        assert_eq!(canonical_site_name("Riot games"), "riotgames");
+        assert_eq!(canonical_site_name("auth.riotgames.com"), "riotgames");
+        assert_eq!(canonical_site_name("Riot games"), canonical_site_name("auth.riotgames.com"));
+        // Battle family collapses too.
+        assert_eq!(canonical_site_name("us.battle"), canonical_site_name("eu.battle"));
+    }
+
     #[test]
     fn build_with_no_filters_returns_all_seeds() {
         use crate::repo::accounts::{self, NewAccount};
