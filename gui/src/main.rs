@@ -61,6 +61,8 @@ fn main() {
             record_recovery_feedback,
             clear_recovery_feedback,
             update_site,
+            list_site_merge_groups,
+            merge_sites,
             generate_password,
             add_base_word,
         ])

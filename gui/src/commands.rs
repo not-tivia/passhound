@@ -5,7 +5,7 @@
 use crate::error::GuiError;
 use crate::state::VaultState;
 use passhound_core::{repo, Vault};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::State;
@@ -115,6 +115,36 @@ pub struct TagWithCount {
     pub id: i64,
     pub name: String,
     pub account_count: i64,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct MergeMemberView {
+    pub site_id: i64,
+    pub name: String,
+    pub account_count: usize,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct MergeGroupView {
+    pub canonical: String,
+    pub clean_name: String,
+    pub survivor_id: i64,
+    pub members: Vec<MergeMemberView>,
+    pub total_accounts: usize,
+}
+
+#[derive(Serialize, Debug, Clone, Default)]
+pub struct MergeResultView {
+    pub groups_merged: usize,
+    pub rows_removed: usize,
+    pub accounts_repointed: usize,
+    pub skipped: usize,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct MergeRequest {
+    pub survivor_id: i64,
+    pub loser_ids: Vec<i64>,
 }
 
 #[derive(Serialize)]
@@ -1938,6 +1968,53 @@ pub fn update_site_inner(
     Ok(())
 }
 
+#[tauri::command]
+pub fn list_site_merge_groups(state: State<'_, VaultState>) -> Result<Vec<MergeGroupView>, GuiError> {
+    list_site_merge_groups_inner(&state)
+}
+
+pub fn list_site_merge_groups_inner(state: &VaultState) -> Result<Vec<MergeGroupView>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let groups = passhound_core::repo::sites::find_merge_groups(v)?;
+    Ok(groups
+        .into_iter()
+        .map(|g| MergeGroupView {
+            canonical: g.canonical,
+            clean_name: g.clean_name,
+            survivor_id: g.survivor_id,
+            members: g
+                .members
+                .into_iter()
+                .map(|m| MergeMemberView { site_id: m.site_id, name: m.name, account_count: m.account_count })
+                .collect(),
+            total_accounts: g.total_accounts,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn merge_sites(state: State<'_, VaultState>, groups: Vec<MergeRequest>) -> Result<MergeResultView, GuiError> {
+    merge_sites_inner(&state, &groups)
+}
+
+pub fn merge_sites_inner(state: &VaultState, groups: &[MergeRequest]) -> Result<MergeResultView, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let mut out = MergeResultView::default();
+    for g in groups {
+        match passhound_core::repo::sites::merge_sites(v, g.survivor_id, &g.loser_ids) {
+            Ok(r) => {
+                out.groups_merged += r.groups_merged;
+                out.rows_removed += r.rows_removed;
+                out.accounts_repointed += r.accounts_repointed;
+            }
+            Err(_) => out.skipped += 1, // one bad group must not abort the batch
+        }
+    }
+    Ok(out)
+}
+
 #[derive(serde::Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratorOptionsPayload {
@@ -3557,5 +3634,65 @@ mod tests {
         let preview2 = import_csv_dry_run_inner(&state, &csv_path, None, None, patches).unwrap();
         assert_eq!(preview2.counts.new, 2, "patched row should be promoted to an entry");
         assert!(preview2.diagnostics.is_empty(), "no diagnostics after patching");
+    }
+
+    #[test]
+    fn list_site_merge_groups_returns_groups_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            sites::create(v, sites::NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
+            sites::create(v, sites::NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        }
+        let groups = list_site_merge_groups_inner(&state).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].canonical, "github");
+        assert_eq!(groups[0].members.len(), 2);
+    }
+
+    #[test]
+    fn merge_sites_via_ipc_accumulates_results() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let (gh_survivor, gh_loser, rd_survivor, rd_loser);
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            gh_loser = sites::create(v, sites::NewSite { name: "https://github.com".into(), ..Default::default() }).unwrap().id;
+            gh_survivor = sites::create(v, sites::NewSite { name: "github".into(), ..Default::default() }).unwrap().id;
+            rd_loser = sites::create(v, sites::NewSite { name: "https://reddit.com".into(), ..Default::default() }).unwrap().id;
+            rd_survivor = sites::create(v, sites::NewSite { name: "reddit".into(), ..Default::default() }).unwrap().id;
+        }
+        let res = merge_sites_inner(&state, &[
+            MergeRequest { survivor_id: gh_survivor, loser_ids: vec![gh_loser] },
+            MergeRequest { survivor_id: rd_survivor, loser_ids: vec![rd_loser] },
+        ]).unwrap();
+        assert_eq!(res.groups_merged, 2);
+        assert_eq!(res.rows_removed, 2);
+        assert_eq!(res.skipped, 0);
+    }
+
+    #[test]
+    fn merge_sites_via_ipc_skips_bad_group_continues_rest() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let (gh_survivor, gh_loser);
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            gh_loser = sites::create(v, sites::NewSite { name: "https://github.com".into(), ..Default::default() }).unwrap().id;
+            gh_survivor = sites::create(v, sites::NewSite { name: "github".into(), ..Default::default() }).unwrap().id;
+        }
+        let res = merge_sites_inner(&state, &[
+            MergeRequest { survivor_id: gh_survivor, loser_ids: vec![gh_loser] }, // good
+            MergeRequest { survivor_id: gh_survivor, loser_ids: vec![999999] },   // bad: NotFound
+        ]).unwrap();
+        assert_eq!(res.groups_merged, 1);
+        assert_eq!(res.skipped, 1);
     }
 }
