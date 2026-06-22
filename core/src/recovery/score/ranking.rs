@@ -747,4 +747,28 @@ mod tests {
         assert!((bd.history_seed - 1.0).abs() < 1e-6,
             "exact-site seed keeps full bonus even under a site query, got {}", bd.history_seed);
     }
+
+    #[test]
+    fn used_trailing_symbol_outranks_unused_by_strong_margin() {
+        // History establishes '!' as a common trailing symbol; '#' never used.
+        // Two otherwise-identical candidates differ only in trailing symbol.
+        // After up-weighting W_FREQ the used-symbol margin must be strong.
+        let mut s = HistoryStats::default();
+        s.trailing_symbol_freq.insert('!', 1.0);
+        let p = pool_with_seed_strength(0.5);
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let mk = |pw: &str| Candidate {
+            password: Zeroizing::new(pw.into()),
+            score: 0.0,
+            provenance: vec![RuleId::SpecialSuffix],
+            seed_history_id: None,
+            breakdown: None,
+        };
+        let used   = score(&mk("fluffy!"), &rc, None);
+        let unused = score(&mk("fluffy#"), &rc, None);
+        let margin = used - unused;
+        assert!(margin > 0.2,
+            "used-symbol should beat unused by a strong margin (got {margin}); W_FREQ too low?");
+    }
 }

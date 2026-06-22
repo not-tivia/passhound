@@ -20,7 +20,7 @@ pub static SCORE_MODIFIERS: &[&'static dyn ScoreModifier] = &[
 // chains (e.g. thunder-moon!!) when both contain the user's hint substring.
 pub const W_SITE: f32         = 0.30;
 pub const W_HINT: f32         = 0.25;
-pub const W_FREQ: f32         = 0.10;
+pub const W_FREQ: f32         = 0.30;  // Phase 4.25 B2 (was 0.10): let real symbol/digit habits bury never-used shapes
 pub const W_FAV_BASE: f32     = 0.10;
 pub const W_LEN: f32          = 0.05;
 pub const W_ORIG_CASING: f32  = 0.20;
