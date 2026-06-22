@@ -198,6 +198,97 @@ pub fn find_merge_groups(vault: &Vault) -> Result<Vec<MergeGroup>> {
     Ok(out)
 }
 
+/// Outcome of one or more site merges.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MergeResult {
+    pub groups_merged: usize,
+    pub rows_removed: usize,
+    pub accounts_repointed: usize,
+}
+
+/// Merge `loser_ids` into `survivor_id`: re-point every account from the losers
+/// onto the survivor, rename the survivor to its clean brand, backfill any empty
+/// survivor field (url/category/notes) from the first loser that has it, then
+/// delete the loser rows. Runs in a single transaction.
+///
+/// Validation (before any write): `loser_ids` non-empty, must not contain
+/// `survivor_id`, every id must exist, and all losers must share the survivor's
+/// `canonical_site_name`. Returns `Error::InvalidInput` / `Error::NotFound`.
+pub fn merge_sites(vault: &Vault, survivor_id: i64, loser_ids: &[i64]) -> Result<MergeResult> {
+    if loser_ids.is_empty() {
+        return Err(Error::InvalidInput("no sites to merge".into()));
+    }
+    if loser_ids.contains(&survivor_id) {
+        return Err(Error::InvalidInput("survivor cannot also be a loser".into()));
+    }
+
+    let survivor = get(vault, survivor_id)?; // NotFound propagates
+    let survivor_canon = canonical_site_name(&survivor.name);
+
+    let mut losers: Vec<Site> = Vec::with_capacity(loser_ids.len());
+    for &lid in loser_ids {
+        let s = get(vault, lid)?; // NotFound propagates
+        let canon = canonical_site_name(&s.name);
+        if canon != survivor_canon {
+            return Err(Error::InvalidInput(format!(
+                "site {lid} canonical '{canon}' does not match survivor '{survivor_canon}'"
+            )));
+        }
+        losers.push(s);
+    }
+
+    let conn = vault.conn();
+    let tx = conn.unchecked_transaction()?;
+
+    // 1. Re-point accounts (per-loser keeps the SQL trivial; loser sets are small)
+    let mut accounts_repointed = 0usize;
+    for &lid in loser_ids {
+        accounts_repointed += conn.execute(
+            "UPDATE accounts SET site_id = ?1 WHERE site_id = ?2",
+            params![survivor_id, lid],
+        )?;
+    }
+
+    // 2. Rename survivor + backfill empty fields from first loser that has them
+    let clean = strip_url_noise(&survivor.name);
+    let new_url = first_non_empty(survivor.url.clone(), losers.iter().map(|l| l.url.clone()));
+    let new_category = first_non_empty(survivor.category.clone(), losers.iter().map(|l| l.category.clone()));
+    let new_notes = first_non_empty(survivor.notes.clone(), losers.iter().map(|l| l.notes.clone()));
+    conn.execute(
+        "UPDATE sites SET name = ?1, url = ?2, category = ?3, notes = ?4 WHERE id = ?5",
+        params![clean, new_url, new_category, new_notes, survivor_id],
+    )?;
+
+    // 3. Delete losers
+    for &lid in loser_ids {
+        conn.execute("DELETE FROM sites WHERE id = ?1", params![lid])?;
+    }
+
+    tx.commit()?;
+    Ok(MergeResult {
+        groups_merged: 1,
+        rows_removed: loser_ids.len(),
+        accounts_repointed,
+    })
+}
+
+/// Return `primary` if it is Some and non-blank; otherwise the first non-blank
+/// value from `fallbacks`; otherwise `primary` unchanged (preserves None/empty).
+fn first_non_empty(
+    primary: Option<String>,
+    fallbacks: impl Iterator<Item = Option<String>>,
+) -> Option<String> {
+    if primary.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+        return primary;
+    }
+    for f in fallbacks {
+        if f.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+            return f;
+        }
+    }
+    primary
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Site {
     pub id: i64,
@@ -323,6 +414,7 @@ fn row_to_site(row: &rusqlite::Row<'_>) -> rusqlite::Result<Site> {
 mod tests {
     use super::*;
     use crate::repo::accounts::{self, NewAccount};
+    use crate::repo::passwords::{self, NewPassword, Confidence};
     use tempfile::TempDir;
 
     fn vault() -> (TempDir, Vault) {
@@ -601,5 +693,75 @@ mod tests {
         assert_eq!(groups[0].survivor_id, clean.id, "the already-clean 'github' row wins");
         assert_eq!(groups[0].clean_name, "github");
         assert_eq!(groups[0].members[0].site_id, clean.id, "survivor listed first");
+    }
+
+    #[test]
+    fn merge_sites_repoints_accounts_and_deletes_losers() {
+        let (_tmp, v) = vault();
+        let url = create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
+        let clean = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        let a = accounts::create(&v, NewAccount { site_id: url.id, username: Some("me".into()), ..Default::default() }).unwrap();
+
+        let res = merge_sites(&v, clean.id, &[url.id]).unwrap();
+        assert_eq!(res.groups_merged, 1);
+        assert_eq!(res.rows_removed, 1);
+        assert_eq!(res.accounts_repointed, 1);
+
+        assert!(matches!(get(&v, url.id), Err(Error::NotFound)), "loser row deleted");
+        assert_eq!(get(&v, clean.id).unwrap().name, "github", "survivor renamed to clean brand");
+        let under = accounts::list_for_site(&v, clean.id, &[]).unwrap();
+        assert_eq!(under.len(), 1);
+        assert_eq!(under[0].id, a.id, "account now under survivor");
+    }
+
+    #[test]
+    fn merge_sites_backfills_empty_survivor_fields() {
+        let (_tmp, v) = vault();
+        let survivor = create(&v, NewSite { name: "github".into(), category: None, ..Default::default() }).unwrap();
+        let loser = create(&v, NewSite {
+            name: "https://github.com".into(),
+            category: Some("Dev".into()),
+            notes: Some("from import".into()),
+            ..Default::default()
+        }).unwrap();
+        merge_sites(&v, survivor.id, &[loser.id]).unwrap();
+        let s = get(&v, survivor.id).unwrap();
+        assert_eq!(s.category.as_deref(), Some("Dev"));
+        assert_eq!(s.notes.as_deref(), Some("from import"));
+    }
+
+    #[test]
+    fn merge_sites_preserves_password_history() {
+        let (_tmp, v) = vault();
+        let loser = create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
+        let survivor = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        let a = accounts::create(&v, NewAccount { site_id: loser.id, username: Some("me".into()), ..Default::default() }).unwrap();
+        passwords::insert(&v, NewPassword {
+            account_id: a.id,
+            plaintext: "pw1",
+            source: "manual".into(),
+            confidence: Confidence::Certain,
+            notes: None,
+            created_at: None,
+        }).unwrap();
+
+        merge_sites(&v, survivor.id, &[loser.id]).unwrap();
+
+        let n: i64 = v.conn().query_row(
+            "SELECT COUNT(*) FROM password_history WHERE account_id = ?1",
+            params![a.id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(n, 1, "password history rides along with the account");
+    }
+
+    #[test]
+    fn merge_sites_rejects_cross_canonical_or_unknown_ids() {
+        let (_tmp, v) = vault();
+        let gh = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        let rd = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        assert!(matches!(merge_sites(&v, gh.id, &[rd.id]), Err(Error::InvalidInput(_))), "cross-canonical rejected");
+        assert!(matches!(merge_sites(&v, gh.id, &[9999]), Err(Error::NotFound)), "unknown loser rejected");
+        assert!(matches!(merge_sites(&v, gh.id, &[gh.id]), Err(Error::InvalidInput(_))), "survivor-as-loser rejected");
     }
 }
