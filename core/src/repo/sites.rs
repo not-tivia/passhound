@@ -103,6 +103,101 @@ pub fn cleanup_url_shaped_site_names(conn: &Connection) -> Result<CleanupReport>
     Ok(CleanupReport { renamed, skipped_collisions: skipped })
 }
 
+/// One site row inside a merge group.
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeMember {
+    pub site_id: i64,
+    pub name: String,
+    pub account_count: usize,
+}
+
+/// A canonical-brand group backed by more than one `sites` row.
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeGroup {
+    pub canonical: String,
+    pub clean_name: String,
+    pub survivor_id: i64,
+    pub members: Vec<MergeMember>,
+    pub total_accounts: usize,
+}
+
+/// List every canonical-name group that has more than one site row, with
+/// per-row account counts and a proposed survivor. Read-only; needs no master
+/// key (site names are plaintext metadata). Single-row brands are omitted.
+///
+/// Survivor selection: prefer a row whose stored name already equals its
+/// `strip_url_noise` form (i.e. already clean); otherwise the lowest id.
+/// Groups are returned biggest-first (by total account count, then canonical).
+pub fn find_merge_groups(vault: &Vault) -> Result<Vec<MergeGroup>> {
+    let conn = vault.conn();
+
+    // account counts per site
+    let mut counts: HashMap<i64, usize> = HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT site_id, COUNT(*) FROM accounts GROUP BY site_id")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+        for r in rows {
+            let (sid, c) = r?;
+            counts.insert(sid, c as usize);
+        }
+    }
+
+    // all sites, in id order so grouping is deterministic
+    let sites: Vec<(i64, String)> = {
+        let mut stmt = conn.prepare("SELECT id, name FROM sites ORDER BY id")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    // group by canonical, preserving first-seen order
+    let mut groups: HashMap<String, Vec<(i64, String)>> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for (id, name) in sites {
+        let canon = canonical_site_name(&name);
+        if canon.is_empty() {
+            continue;
+        }
+        if !groups.contains_key(&canon) {
+            order.push(canon.clone());
+        }
+        groups.entry(canon).or_default().push((id, name));
+    }
+
+    let mut out: Vec<MergeGroup> = Vec::new();
+    for canon in order {
+        let rows = &groups[&canon];
+        if rows.len() < 2 {
+            continue;
+        }
+        // survivor: first already-clean row (id order), else lowest id
+        let survivor_id = rows
+            .iter()
+            .find(|(_, n)| strip_url_noise(n) == *n)
+            .or_else(|| rows.iter().min_by_key(|(id, _)| *id))
+            .map(|(id, _)| *id)
+            .unwrap();
+        let survivor_name = rows.iter().find(|(id, _)| *id == survivor_id).map(|(_, n)| n).unwrap();
+        let clean_name = strip_url_noise(survivor_name);
+
+        let mut members: Vec<MergeMember> = rows
+            .iter()
+            .map(|(id, n)| MergeMember {
+                site_id: *id,
+                name: n.clone(),
+                account_count: counts.get(id).copied().unwrap_or(0),
+            })
+            .collect();
+        // survivor first, then losers by id
+        members.sort_by_key(|m| (m.site_id != survivor_id, m.site_id));
+        let total_accounts = members.iter().map(|m| m.account_count).sum();
+
+        out.push(MergeGroup { canonical: canon, clean_name, survivor_id, members, total_accounts });
+    }
+
+    out.sort_by(|a, b| b.total_accounts.cmp(&a.total_accounts).then(a.canonical.cmp(&b.canonical)));
+    Ok(out)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Site {
     pub id: i64,
@@ -227,6 +322,7 @@ fn row_to_site(row: &rusqlite::Row<'_>) -> rusqlite::Result<Site> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo::accounts::{self, NewAccount};
     use tempfile::TempDir;
 
     fn vault() -> (TempDir, Vault) {
@@ -474,5 +570,36 @@ mod tests {
             name: "x".into(), ..Default::default()
         }).unwrap_err();
         assert!(matches!(err, Error::NotFound));
+    }
+
+    // Phase 4.24 ---------------------------------------------------------------
+
+    #[test]
+    fn find_merge_groups_lists_only_multi_row_canonicals() {
+        let (_tmp, v) = vault();
+        // Two rows that canonicalize to "github"
+        let url = create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
+        create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        // A lone site -> not a group
+        create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        // Give the URL row one account so counts are exercised
+        accounts::create(&v, NewAccount { site_id: url.id, username: Some("me".into()), ..Default::default() }).unwrap();
+
+        let groups = find_merge_groups(&v).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].canonical, "github");
+        assert_eq!(groups[0].members.len(), 2);
+        assert_eq!(groups[0].total_accounts, 1);
+    }
+
+    #[test]
+    fn find_merge_groups_picks_already_clean_survivor() {
+        let (_tmp, v) = vault();
+        create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
+        let clean = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        let groups = find_merge_groups(&v).unwrap();
+        assert_eq!(groups[0].survivor_id, clean.id, "the already-clean 'github' row wins");
+        assert_eq!(groups[0].clean_name, "github");
+        assert_eq!(groups[0].members[0].site_id, clean.id, "survivor listed first");
     }
 }
