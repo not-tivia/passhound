@@ -2193,3 +2193,27 @@ select option {
   color: var(--text-1);
   border-top: 1px solid var(--border);
 }
+
+/* Phase 4.24 — site merge overlay */
+.modal__btn--primary {
+  border-color: var(--accent, #4caf50) !important;
+  color: var(--accent, #4caf50) !important;
+}
+.modal__btn--primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.modal--site-merge { max-width: 640px; width: 90vw; max-height: 80vh; display: flex; flex-direction: column; }
+.site-merge__intro { color: var(--text-muted, #888); font-size: 0.9rem; margin: 0 0 0.25rem; }
+.site-merge__tip { color: var(--text-muted, #888); font-size: 0.8rem; font-style: italic; margin: 0 0 0.75rem; }
+.site-merge__result { color: var(--accent, #4caf50); font-size: 0.9rem; margin: 0 0 0.5rem; }
+.site-merge__count { font-size: 0.8rem; color: var(--text-muted, #888); margin-bottom: 0.5rem; }
+.site-merge__list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+.site-merge__group { border-bottom: 1px solid var(--border, #333); }
+.site-merge__row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; }
+.site-merge__chevron { background: none; border: none; cursor: pointer; color: inherit; width: 1.2rem; }
+.site-merge__brand { font-weight: 600; }
+.site-merge__meta { color: var(--text-muted, #888); font-size: 0.8rem; margin-left: auto; }
+.site-merge__members { list-style: none; margin: 0 0 0.4rem 2.2rem; padding: 0; }
+.site-merge__member { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; padding: 0.15rem 0; color: var(--text-muted, #999); }
+.site-merge__member--survivor { color: inherit; }
+.site-merge__member-name { word-break: break-all; }
+.site-merge__keep { font-size: 0.7rem; background: var(--accent, #4caf50); color: #fff; border-radius: 3px; padding: 0 0.3rem; }
+.site-merge__member-count { margin-left: auto; white-space: nowrap; }

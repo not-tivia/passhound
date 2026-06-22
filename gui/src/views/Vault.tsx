@@ -4,6 +4,7 @@ import AccountsTable from "../components/AccountsTable";
 import TagsSidebar from "../components/TagsSidebar";
 import BulkActionBar from "../components/BulkActionBar";
 import ManageTagsOverlay from "../components/ManageTagsOverlay";
+import SiteMergeOverlay from "../components/SiteMergeOverlay";
 import AccountFormModal from "../components/AccountFormModal";
 import PerSite from "./PerSite";
 import Import from "./Import";
@@ -30,6 +31,7 @@ export default function Vault({ onLock }: VaultProps) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
   const [manageOpen, setManageOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [addingAccount, setAddingAccount] = useState(false);
 
   // Lifted from AccountsTable so BulkActionBar can read the same accounts array.
@@ -93,6 +95,7 @@ export default function Vault({ onLock }: VaultProps) {
               filterTagIds={filterTagIds}
               onFilterChange={setFilterTagIds}
               onManageClick={() => setManageOpen(true)}
+              onMergeClick={() => setMergeOpen(true)}
               onLockedError={onLock}
               refreshKey={refreshKey}
             />
@@ -161,6 +164,13 @@ export default function Vault({ onLock }: VaultProps) {
                   setRefreshKey((k) => k + 1);
                   setFilterTagIds([]); // Drop any filter that may now point at a renamed/deleted tag.
                 }}
+              />
+            )}
+            {mergeOpen && (
+              <SiteMergeOverlay
+                onClose={() => setMergeOpen(false)}
+                onLockedError={onLock}
+                onMutated={() => setRefreshKey((k) => k + 1)}
               />
             )}
           </div>
