@@ -14,10 +14,14 @@ pub static SCORE_MODIFIERS: &[&'static dyn ScoreModifier] = &[
     &era_boost::EraBoost,
 ];
 
-// Convex weights — sum to 1.0. Phase 3.7 lever 3 added W_ORIG_CASING and
-// rebalanced others; the goal is to make original-casing-derived synthesis
-// chains (e.g. MoonBeam$2019Rd from MoonBeam seed) outrank machine-variant
-// chains (e.g. thunder-moon!!) when both contain the user's hint substring.
+// Core relevance weights. Phase 3.7 lever 3 added W_ORIG_CASING and rebalanced
+// others; the goal is to make original-casing-derived synthesis chains (e.g.
+// MoonBeam$2019Rd from MoonBeam seed) outrank machine-variant chains (e.g.
+// thunder-moon!!) when both contain the user's hint substring.
+// NOTE: these are NOT renormalized to sum to 1.0 (they sum to 1.20 since Phase
+// 4.25 B2 raised W_FREQ to 0.30). The scorer is a raw weighted sum that already
+// exceeds 1.0 via the additive history/clean-pattern bonuses below; only the
+// RELATIVE magnitudes matter for ranking.
 pub const W_SITE: f32         = 0.30;
 pub const W_HINT: f32         = 0.25;
 pub const W_FREQ: f32         = 0.30;  // Phase 4.25 B2 (was 0.10): let real symbol/digit habits bury never-used shapes
