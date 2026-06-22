@@ -25,6 +25,9 @@ import type {
   UpdateSitePayload,
   GeneratorOptionsPayload,
   EraFormArgs,
+  MergeGroupView,
+  MergeResultView,
+  MergeRequest,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -223,4 +226,8 @@ export const api = {
     call<string>("reveal_candidate", { rank }),
   copyCandidate: (rank: number) =>
     call<void>("copy_candidate", { rank }),
+
+  // Phase 4.24 — site merge
+  listSiteMergeGroups: () => call<MergeGroupView[]>("list_site_merge_groups"),
+  mergeSites: (groups: MergeRequest[]) => call<MergeResultView>("merge_sites", { groups }),
 };

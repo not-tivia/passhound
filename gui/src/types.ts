@@ -290,3 +290,30 @@ export interface GeneratorOptionsPayload {
   symbols: boolean;
   avoidAmbiguous: boolean;
 }
+
+// Phase 4.24 — site merge
+export interface MergeMemberView {
+  site_id: number;
+  name: string;
+  account_count: number;
+}
+
+export interface MergeGroupView {
+  canonical: string;
+  clean_name: string;
+  survivor_id: number;
+  members: MergeMemberView[];
+  total_accounts: number;
+}
+
+export interface MergeResultView {
+  groups_merged: number;
+  rows_removed: number;
+  accounts_repointed: number;
+  skipped: number;
+}
+
+export interface MergeRequest {
+  survivor_id: number;
+  loser_ids: number[];
+}
