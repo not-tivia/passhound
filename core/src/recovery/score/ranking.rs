@@ -3,7 +3,7 @@
 use crate::recovery::clean_pattern;
 use crate::recovery::score::{
     W_CLEAN_PATTERN, W_FAV_BASE, W_FREQ, W_HINT, W_HISTORY_DESCENDANT, W_HISTORY_SEED, W_LEN,
-    W_ORIG_CASING, W_SITE,
+    W_ORIG_CASING, W_SITE, HISTORY_SITE_MISMATCH_FACTOR,
 };
 use crate::recovery::stats::{count_trailing_digits, trailing_year};
 use crate::recovery::{Candidate, RecoverContext, RuleId};
@@ -64,7 +64,16 @@ pub fn score_with_breakdown(
     // raw seed's provenance with a transformer child that produced an
     // identical plaintext, leaving both rules on one candidate; only the
     // stronger HistorySeed counts.
-    let history_strength = site_seed.unwrap_or(0.5);
+    let raw_strength = site_seed.unwrap_or(0.5);
+    // Phase 4.25 B1: site-first. When a site was queried, a seed that isn't an
+    // exact-site match (strength < 1.0) is demoted hard so verbatim wrong-site
+    // history can't crowd out site-relevant candidates. Freeform recovery
+    // (no site) is unchanged.
+    let history_strength = if ctx.config.site.is_some() && raw_strength < 1.0 {
+        raw_strength * HISTORY_SITE_MISMATCH_FACTOR
+    } else {
+        raw_strength
+    };
     let has_seed = c.provenance.contains(&RuleId::HistorySeed);
     let has_descendant = c.provenance.contains(&RuleId::HistoryDescendant);
     let history_seed = if has_seed { history_strength } else { 0.0 };
@@ -697,5 +706,45 @@ mod tests {
         let s_right = score(&right_site_synth, &rc, None);
         assert!(s_right > s_wrong,
             "right-site synthesis must outrank wrong-site historical seed; got synth={s_right} wrong_seed={s_wrong}");
+    }
+
+    #[test]
+    fn site_queried_wrong_site_seed_is_demoted() {
+        // site queried + seed is NOT an exact-site match (strength 0.5)
+        // -> history bonus scaled by HISTORY_SITE_MISMATCH_FACTOR.
+        let p = pool_with_seed_strength(0.5);
+        let s = HistoryStats::default();
+        let mut c = RecoverConfig::default();
+        c.site = Some("TacoBell".into());
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&cand, &rc, None);
+        assert!((bd.history_seed - 0.075).abs() < 1e-6,
+            "0.5 strength * 0.15 mismatch factor = 0.075, got {}", bd.history_seed);
+    }
+
+    #[test]
+    fn site_queried_exact_match_seed_keeps_full_bonus() {
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default();
+        let mut c = RecoverConfig::default();
+        c.site = Some("TacoBell".into());
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("PW".into()),
+            score: 0.0,
+            provenance: vec![RuleId::HistorySeed],
+            seed_history_id: Some(1),
+            breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&cand, &rc, None);
+        assert!((bd.history_seed - 1.0).abs() < 1e-6,
+            "exact-site seed keeps full bonus even under a site query, got {}", bd.history_seed);
     }
 }

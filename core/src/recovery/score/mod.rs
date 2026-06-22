@@ -38,6 +38,11 @@ pub const W_CLEAN_PATTERN: f32 = 0.05;
 pub const W_HISTORY_SEED: f32 = 1.0;
 pub const W_HISTORY_DESCENDANT: f32 = 0.5;
 
+/// Phase 4.25 B1 — when the user queried a specific site, a history seed that
+/// is NOT an exact site match has its history bonus scaled by this factor
+/// (site-first ranking). Freeform recovery (no site) is unchanged.
+pub const HISTORY_SITE_MISMATCH_FACTOR: f32 = 0.15;
+
 #[derive(Debug, Clone)]
 pub struct ScoreBreakdown {
     pub site: f32,         pub site_weighted: f32,
