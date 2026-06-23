@@ -1,5 +1,6 @@
 pub mod add;
 pub mod analyze;
+pub mod audit;
 pub mod base_word;
 pub mod era;
 pub mod get;
