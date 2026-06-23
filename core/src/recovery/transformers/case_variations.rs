@@ -1,4 +1,4 @@
-//! CaseVariations — emits lower / UPPER / TitleCase / cAmElCaSe of input.
+//! CaseVariations — emits lower / UPPER / TitleCase of input.
 
 use crate::recovery::transformers::Transformer;
 use crate::recovery::{child_provenance, Candidate, RecoverContext, RuleId};
@@ -14,10 +14,9 @@ impl Transformer for CaseVariations {
         let lower = src.to_lowercase();
         let upper = src.to_uppercase();
         let title = title_case(src);
-        let camel = alternating_case(src);
 
         let mut variants: Vec<String> = Vec::new();
-        for v in [lower, upper, title, camel] {
+        for v in [lower, upper, title] {
             if v != src && !variants.contains(&v) {
                 variants.push(v);
             }
@@ -52,20 +51,6 @@ fn title_case(s: &str) -> String {
     out
 }
 
-fn alternating_case(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut upper = false;
-    for c in s.chars() {
-        if c.is_alphabetic() {
-            if upper { out.extend(c.to_uppercase()); }
-            else { out.extend(c.to_lowercase()); }
-            upper = !upper;
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
 
 #[cfg(test)]
 mod tests {
@@ -93,24 +78,31 @@ mod tests {
     }
 
     #[test]
-    fn emits_distinct_variants() {
+    fn emits_lower_upper_title_only() {
         let (p, s, c) = ctx();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let out = CaseVariations.transform(&cand("fluffy"), &rc);
         let strs: Vec<String> = out.iter().map(|x| x.password.as_str().to_string()).collect();
         assert!(strs.contains(&"FLUFFY".to_string()));
         assert!(strs.contains(&"Fluffy".to_string()));
-        assert!(strs.iter().any(|s| s.chars().any(|c| c.is_uppercase()) && s.chars().any(|c| c.is_lowercase())));
-        // "fluffy" itself is the input, must NOT appear in outputs.
+        // input "fluffy" itself is excluded; no alternating "fLuFfY"-shape output.
         assert!(!strs.contains(&"fluffy".to_string()));
+        assert!(!strs.iter().any(|v| is_alternating(v)), "no alternating-case output; got {strs:?}");
+    }
+
+    // Detects a strict alternating upper/lower pattern over alphabetic chars.
+    fn is_alternating(s: &str) -> bool {
+        let letters: Vec<char> = s.chars().filter(|c| c.is_alphabetic()).collect();
+        if letters.len() < 3 { return false; }
+        letters.windows(2).all(|w| w[0].is_uppercase() != w[1].is_uppercase())
     }
 
     #[test]
-    fn caps_at_four_outputs() {
+    fn caps_at_three_outputs() {
         let (p, s, c) = ctx();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
         let out = CaseVariations.transform(&cand("fluffy"), &rc);
-        assert!(out.len() <= 4);
+        assert!(out.len() <= 3);
     }
 
     #[test]
