@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn dedups_identical_to_input() {
-        // ALL-UPPERCASE input: lower != input, upper == input, title != input, camel != input
+        // ALL-UPPERCASE input: lower != input, upper == input, title != input
         // -> at most 3 variants.
         let (p, s, c) = ctx();
         let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
