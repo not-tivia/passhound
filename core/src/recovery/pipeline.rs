@@ -81,9 +81,12 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
                 };
                 let hint_lower = ctx.config.hint.as_ref().map(|h| h.to_lowercase());
                 let (mut hint_matched, mut others): (Vec<Candidate>, Vec<Candidate>) =
-                    fan.into_iter().partition(|c| match &hint_lower {
-                        Some(h) => c.password.to_lowercase().contains(h),
-                        None => false,
+                    fan.into_iter().partition(|c| {
+                        c.provenance.contains(&RuleId::HistorySeed)
+                            || match &hint_lower {
+                                Some(h) => c.password.to_lowercase().contains(h),
+                                None => false,
+                            }
                     });
                 if hint_matched.len() >= MAX_INTERMEDIATE {
                     hint_matched.sort_by(&by_score);
@@ -119,8 +122,8 @@ pub fn recover(vault: &Vault, mut config: RecoverConfig) -> Result<Vec<Candidate
     // Constraints filter.
     fan.retain(|c| satisfies_constraints(c, &config));
 
-    // Sort by score desc.
-    fan.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort real-passwords-first: tier asc, then score desc (Phase 4.26).
+    let mut fan = ranking::sorted_by_tier(fan, &ctx);
 
     fan.truncate(config.limit);
     Ok(fan)
@@ -339,6 +342,28 @@ mod tests {
             strs.len(),
             strs.iter().take(20).collect::<Vec<_>>(),
         );
+    }
+
+    #[test]
+    fn real_seeds_rank_above_synthesis_end_to_end() {
+        // A vault of plain dictionary-ish history. The top results must be
+        // verbatim seeds (tier 0/1), not multi-transform synthesis (tier 3).
+        let (_t, v) = vault_with_history(&["alpha", "bravo", "charlie", "delta"]);
+        extract_base_words_from_history(&v, 4).unwrap();
+        let cfg = RecoverConfig { limit: 20, ..Default::default() };
+        let out = recover(&v, cfg).unwrap();
+        assert!(!out.is_empty());
+        // The very first candidate must be a verbatim history seed (tier <= 1),
+        // i.e. carry HistorySeed provenance with no divergence transforms.
+        let first = &out[0];
+        assert!(first.provenance.contains(&RuleId::HistorySeed),
+            "top candidate should be a verbatim history seed, got provenance {:?}", first.provenance);
+        // Every verbatim seed must precede every non-seed candidate, i.e. the
+        // HistorySeed candidates form a contiguous prefix of the output.
+        let total_seeds = out.iter().filter(|c| c.provenance.contains(&RuleId::HistorySeed)).count();
+        let prefix_seeds = out.iter().take_while(|c| c.provenance.contains(&RuleId::HistorySeed)).count();
+        assert_eq!(prefix_seeds, total_seeds,
+            "all verbatim seeds must rank before any non-seed candidate (seeds = contiguous prefix)");
     }
 
     #[test]
