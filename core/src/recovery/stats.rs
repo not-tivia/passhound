@@ -5,6 +5,50 @@ use crate::vault::Vault;
 use std::collections::HashMap;
 use zeroize::Zeroizing;
 
+/// `s` starts or ends (case-insensitive) with one of the site abbreviations
+/// (each length >= 2). Boundary-only: an abbreviation appearing in the interior
+/// does not count.
+pub fn has_site_affix(s: &str, abbrevs: &[String]) -> bool {
+    if !s.is_ascii() {
+        return false;
+    }
+    let low = s.to_ascii_lowercase();
+    abbrevs.iter().any(|a| {
+        let a = a.to_ascii_lowercase();
+        a.len() >= 2 && low.len() > a.len() && (low.starts_with(&a) || low.ends_with(&a))
+    })
+}
+
+/// `s`'s last character is a non-alphanumeric symbol.
+pub fn ends_with_symbol(s: &str) -> bool {
+    s.chars().last().map(|c| !c.is_alphanumeric()).unwrap_or(false)
+}
+
+/// `s` ends in at least one digit.
+pub fn ends_with_digit(s: &str) -> bool {
+    count_trailing_digits(s) > 0
+}
+
+/// `s` contains an interior digit flanked by ASCII letters (in-word leetspeak,
+/// e.g. `p4ss`). A trailing or leading digit run does NOT count.
+pub fn has_interior_leet(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 3 {
+        return false;
+    }
+    for i in 1..b.len() - 1 {
+        if b[i].is_ascii_digit() && (b[i - 1].is_ascii_alphabetic() && b[i + 1].is_ascii_alphabetic()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `s` contains at least one uppercase ASCII letter.
+pub fn has_uppercase(s: &str) -> bool {
+    s.bytes().any(|b| b.is_ascii_uppercase())
+}
+
 impl HistoryStats {
     /// Compute pattern statistics from EVERY password_history row (current + retired).
     /// Vault must be unlocked.
@@ -21,11 +65,27 @@ impl HistoryStats {
             return Ok(Self::default());
         }
 
+        // Site abbreviations (declared + brand) for the SiteAffix detector.
+        let mut abbrevs: Vec<String> = Vec::new();
+        {
+            let mut astmt = vault.conn().prepare("SELECT name, abbreviations FROM sites")?;
+            let arows = astmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in arows.flatten() {
+                let (name, abbr_json) = row;
+                for a in serde_json::from_str::<Vec<String>>(&abbr_json).unwrap_or_default() {
+                    if a.len() >= 2 { abbrevs.push(a); }
+                }
+                let brand = crate::site_name::strip_url_noise(&name);
+                if brand.len() >= 2 { abbrevs.push(brand); }
+            }
+        }
+
         let mut trailing_symbol_counts: HashMap<char, usize> = HashMap::new();
         let mut trailing_digit_count_counts: HashMap<u8, usize> = HashMap::new();
         let mut total_len: usize = 0;
         let mut year_counts: HashMap<u16, usize> = HashMap::new();
         let total_rows = rows.len();
+        let mut applic: HashMap<crate::recovery::RuleId, usize> = HashMap::new();
 
         for (ct, nonce_vec) in rows {
             if nonce_vec.len() != NONCE_LEN {
@@ -55,6 +115,14 @@ impl HistoryStats {
             if let Some(year) = trailing_year(s) {
                 *year_counts.entry(year).or_insert(0) += 1;
             }
+
+            // Per-rule applicability detectors.
+            use crate::recovery::RuleId;
+            if has_site_affix(s, &abbrevs)   { *applic.entry(RuleId::SiteAffix).or_insert(0) += 1; }
+            if ends_with_symbol(s)           { *applic.entry(RuleId::SpecialSuffix).or_insert(0) += 1; }
+            if ends_with_digit(s)            { *applic.entry(RuleId::NumberIncrement).or_insert(0) += 1; }
+            if has_interior_leet(s)          { *applic.entry(RuleId::LeetSwap).or_insert(0) += 1; }
+            if has_uppercase(s)              { *applic.entry(RuleId::CaseVariations).or_insert(0) += 1; }
         }
 
         let total = total_rows as f32;
@@ -68,12 +136,17 @@ impl HistoryStats {
             .map(|(y, n)| (y, n as f32 / total))
             .collect();
         let mean_length = total_len as f32 / total;
+        let rule_applicability: HashMap<crate::recovery::RuleId, f32> = applic.into_iter()
+            .map(|(r, n)| (r, n as f32 / total))
+            .collect();
 
         Ok(Self {
             trailing_symbol_freq,
             trailing_digit_count_freq,
             mean_length,
             year_suffix_freq,
+            rule_applicability,
+            corpus_size: total_rows,
         })
     }
 }
@@ -116,6 +189,29 @@ mod tests {
     use crate::repo::accounts::{self, NewAccount};
     use crate::repo::sites::{self, NewSite};
     use tempfile::TempDir;
+
+    #[test]
+    fn site_affix_detector() {
+        let abbr = vec!["rg".to_string(), "rio".to_string()];
+        assert!(has_site_affix("RGmoonbeam", &abbr));   // prefix
+        assert!(has_site_affix("moonbeamRG", &abbr));   // suffix
+        assert!(has_site_affix("RIOpassword", &abbr));  // case-insensitive
+        assert!(!has_site_affix("moonbeam", &abbr));    // no affix
+        assert!(!has_site_affix("regretful", &abbr));   // "rg" not a boundary affix (interior)
+    }
+
+    #[test]
+    fn structural_detectors() {
+        assert!(ends_with_symbol("moonbeam!"));
+        assert!(!ends_with_symbol("moonbeam1"));
+        assert!(ends_with_digit("moonbeam2019"));
+        assert!(!ends_with_digit("moonbeam!"));
+        assert!(has_interior_leet("p4ssword"));     // digit between letters
+        assert!(!has_interior_leet("password1"));   // trailing digit is NOT interior leet
+        assert!(!has_interior_leet("2019moon"));    // leading digit, letter only on one side at idx0 -> not interior
+        assert!(has_uppercase("MoonBeam"));
+        assert!(!has_uppercase("moonbeam"));
+    }
 
     fn make_vault_with_passwords(passwords: &[&str]) -> (TempDir, Vault) {
         let tmp = TempDir::new().unwrap();
@@ -178,5 +274,27 @@ mod tests {
         let stats = HistoryStats::compute(&v).unwrap();
         assert!((stats.trailing_symbol_freq.get(&'!').copied().unwrap_or(0.0) - 2.0/3.0).abs() < 0.01);
         assert!((stats.trailing_symbol_freq.get(&'?').copied().unwrap_or(0.0) - 1.0/3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn compute_measures_rule_applicability() {
+        use crate::repo::accounts::{self, NewAccount};
+        use crate::repo::sites::{self, NewSite};
+        use crate::repo::passwords::{self, Confidence, NewPassword};
+        use crate::vault::Vault;
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let v = Vault::create(&tmp.path().join("v.db"), b"x").unwrap();
+        let s = sites::create(&v, NewSite { name: "RuneScape".into(), abbreviations: vec!["RS".into()], ..Default::default() }).unwrap();
+        for pw in ["moonbeam2019", "thunder2020", "fluffy!", "plainword"] {
+            let a = accounts::create(&v, NewAccount { site_id: s.id, ..Default::default() }).unwrap();
+            passwords::insert(&v, NewPassword { account_id: a.id, plaintext: pw, source: "m".into(), confidence: Confidence::Certain, notes: None, created_at: None }).unwrap();
+        }
+        let st = HistoryStats::compute(&v).unwrap();
+        assert_eq!(st.corpus_size, 4);
+        // 2 of 4 end in digits, 1 of 4 ends in a symbol, 0 have a site affix.
+        assert!((st.rule_applicability.get(&crate::recovery::RuleId::NumberIncrement).copied().unwrap_or(0.0) - 0.5).abs() < 1e-6);
+        assert!((st.rule_applicability.get(&crate::recovery::RuleId::SpecialSuffix).copied().unwrap_or(0.0) - 0.25).abs() < 1e-6);
+        assert_eq!(st.rule_applicability.get(&crate::recovery::RuleId::SiteAffix).copied().unwrap_or(0.0), 0.0);
     }
 }
