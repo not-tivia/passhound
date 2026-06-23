@@ -9,6 +9,58 @@ use crate::recovery::stats::{count_trailing_digits, trailing_year};
 use crate::recovery::{Candidate, RecoverContext, RuleId};
 use std::collections::HashMap;
 
+/// Rules that mutate a candidate's string away from its seed. OriginalCasing,
+/// BaseWordPool, WordCombine, EraBoost, and the History* markers are NOT
+/// divergence transforms.
+const DIVERGENCE_RULES: [RuleId; 5] = [
+    RuleId::CaseVariations,
+    RuleId::SpecialSuffix,
+    RuleId::SiteAffix,
+    RuleId::NumberIncrement,
+    RuleId::LeetSwap,
+];
+
+/// Count of divergence transforms stacked on a candidate.
+pub fn transform_depth(c: &Candidate) -> usize {
+    c.provenance
+        .iter()
+        .filter(|r| DIVERGENCE_RULES.iter().any(|d| d == *r))
+        .count()
+}
+
+/// Ranking tier (lower = more likely a real password). The final sort orders by
+/// (tier asc, score desc): a lower-priority tier never outranks a higher one.
+///   0: verbatim history, exact-site match
+///   1: verbatim history, other site
+///   2: one-transform variant of a real password
+///   3: deeper descendants + pure synthesis
+pub fn tier(c: &Candidate, ctx: &RecoverContext<'_>) -> u8 {
+    if c.provenance.contains(&RuleId::HistorySeed) {
+        let strength = c
+            .seed_history_id
+            .and_then(|id| ctx.pool.seeds.iter().find(|s| s.history_id == id))
+            .map(|s| s.site_match_strength)
+            .unwrap_or(0.5);
+        if (strength - 1.0).abs() < f32::EPSILON { 0 } else { 1 }
+    } else if c.provenance.contains(&RuleId::HistoryDescendant) && transform_depth(c) == 1 {
+        2
+    } else {
+        3
+    }
+}
+
+/// Sort a fan real-passwords-first: tier ascending, then cached score descending.
+/// Computes each tier once (it does a seed lookup) rather than inside the
+/// comparator. Moves candidates — no cloning.
+pub fn sorted_by_tier(fan: Vec<Candidate>, ctx: &RecoverContext<'_>) -> Vec<Candidate> {
+    let mut keyed: Vec<(u8, Candidate)> = fan.into_iter().map(|c| (tier(&c, ctx), c)).collect();
+    keyed.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    keyed.into_iter().map(|(_, c)| c).collect()
+}
+
 pub fn score(
     c: &Candidate,
     ctx: &RecoverContext<'_>,
@@ -770,5 +822,81 @@ mod tests {
         let margin = used - unused;
         assert!(margin > 0.2,
             "used-symbol should beat unused by a strong margin (got {margin}); W_FREQ too low?");
+    }
+
+    // Phase 4.26 ---------------------------------------------------------------
+
+    #[test]
+    fn transform_depth_counts_only_divergence_rules() {
+        let c = Candidate {
+            password: Zeroizing::new("x".into()), score: 0.0,
+            provenance: vec![RuleId::HistorySeed, RuleId::OriginalCasing, RuleId::SiteAffix, RuleId::SpecialSuffix],
+            seed_history_id: Some(1), breakdown: None,
+        };
+        assert_eq!(transform_depth(&c), 2, "SiteAffix + SpecialSuffix count; HistorySeed + OriginalCasing do not");
+        let verbatim = Candidate {
+            password: Zeroizing::new("x".into()), score: 0.0,
+            provenance: vec![RuleId::HistorySeed], seed_history_id: Some(1), breakdown: None,
+        };
+        assert_eq!(transform_depth(&verbatim), 0);
+    }
+
+    fn cand(prov: Vec<RuleId>, seed: Option<i64>) -> Candidate {
+        Candidate { password: Zeroizing::new("pw".into()), score: 0.0, provenance: prov, seed_history_id: seed, breakdown: None }
+    }
+
+    #[test]
+    fn tier_exact_site_seed_is_0() {
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default(); let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        assert_eq!(tier(&cand(vec![RuleId::HistorySeed], Some(1)), &rc), 0);
+    }
+
+    #[test]
+    fn tier_other_site_seed_is_1() {
+        let p = pool_with_seed_strength(0.5);
+        let s = HistoryStats::default(); let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        assert_eq!(tier(&cand(vec![RuleId::HistorySeed], Some(1)), &rc), 1);
+    }
+
+    #[test]
+    fn tier_one_transform_descendant_is_2() {
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default(); let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        assert_eq!(tier(&cand(vec![RuleId::HistoryDescendant, RuleId::SpecialSuffix], Some(1)), &rc), 2);
+    }
+
+    #[test]
+    fn tier_deep_descendant_is_3() {
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default(); let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        assert_eq!(tier(&cand(vec![RuleId::HistoryDescendant, RuleId::SpecialSuffix, RuleId::SiteAffix], Some(1)), &rc), 3);
+    }
+
+    #[test]
+    fn tier_pure_synthesis_is_3() {
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default(); let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        assert_eq!(tier(&cand(vec![RuleId::BaseWordPool, RuleId::SpecialSuffix], None), &rc), 3);
+    }
+
+    #[test]
+    fn tier_sort_puts_real_seed_above_stacked_synthesis() {
+        let p = pool_with_seed_strength(0.5); // seed history_id 1 -> tier 1
+        let s = HistoryStats::default(); let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let seed = Candidate { password: Zeroizing::new("oldpw".into()), score: 0.10,
+            provenance: vec![RuleId::HistorySeed], seed_history_id: Some(1), breakdown: None };
+        let synth = Candidate { password: Zeroizing::new("RGpass4word#".into()), score: 0.99,
+            provenance: vec![RuleId::BaseWordPool, RuleId::SiteAffix, RuleId::SpecialSuffix, RuleId::HistoryDescendant],
+            seed_history_id: Some(1), breakdown: None };
+        let sorted = sorted_by_tier(vec![synth, seed], &rc);
+        assert_eq!(sorted[0].password.as_str(), "oldpw", "tier-1 seed must beat tier-3 synthesis despite lower score");
+        assert_eq!(sorted[1].password.as_str(), "RGpass4word#");
     }
 }
