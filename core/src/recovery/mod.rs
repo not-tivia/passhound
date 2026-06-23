@@ -179,6 +179,7 @@ pub struct HistoryStats {
     pub year_suffix_freq: HashMap<u16, f32>,
     pub rule_applicability: std::collections::HashMap<RuleId, f32>,
     pub corpus_size: usize,
+    pub rule_fit: std::collections::HashMap<RuleId, f32>,
 }
 
 // Stub functions live in submodule files; this is the type-only skeleton.

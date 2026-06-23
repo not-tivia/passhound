@@ -139,6 +139,7 @@ impl HistoryStats {
         let rule_applicability: HashMap<crate::recovery::RuleId, f32> = applic.into_iter()
             .map(|(r, n)| (r, n as f32 / total))
             .collect();
+        let rule_fit = crate::recovery::score::rule_fit::compute(&rule_applicability, total_rows);
 
         Ok(Self {
             trailing_symbol_freq,
@@ -147,6 +148,7 @@ impl HistoryStats {
             year_suffix_freq,
             rule_applicability,
             corpus_size: total_rows,
+            rule_fit,
         })
     }
 }

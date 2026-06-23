@@ -4,6 +4,7 @@ use crate::recovery::{Candidate, RecoverContext};
 
 pub mod ranking;
 pub mod era_boost;
+pub mod rule_fit;
 
 pub trait ScoreModifier: Sync {
     fn name(&self) -> &'static str;
