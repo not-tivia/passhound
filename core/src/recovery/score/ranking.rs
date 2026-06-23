@@ -3,7 +3,7 @@
 use crate::recovery::clean_pattern;
 use crate::recovery::score::{
     W_CLEAN_PATTERN, W_FAV_BASE, W_FREQ, W_HINT, W_HISTORY_DESCENDANT, W_HISTORY_SEED, W_LEN,
-    W_ORIG_CASING, W_SITE, HISTORY_SITE_MISMATCH_FACTOR,
+    W_ORIG_CASING, W_SITE, HISTORY_DESCENDANT_DECAY, HISTORY_SITE_MISMATCH_FACTOR,
 };
 use crate::recovery::stats::{count_trailing_digits, trailing_year};
 use crate::recovery::{Candidate, RecoverContext, RuleId};
@@ -129,7 +129,15 @@ pub fn score_with_breakdown(
     let has_seed = c.provenance.contains(&RuleId::HistorySeed);
     let has_descendant = c.provenance.contains(&RuleId::HistoryDescendant);
     let history_seed = if has_seed { history_strength } else { 0.0 };
-    let history_descendant = if has_descendant && !has_seed { history_strength } else { 0.0 };
+    // Phase 4.26: decay the descendant bonus by transform depth, so a chain
+    // mutated far from the real password keeps little history credit.
+    let depth = transform_depth(c);
+    let descendant_decay = HISTORY_DESCENDANT_DECAY.powi(depth as i32);
+    let history_descendant = if has_descendant && !has_seed {
+        history_strength * descendant_decay
+    } else {
+        0.0
+    };
 
     // Clean-pattern bonus (Phase 3.8 + 3.9): additive bonus scaled by the
     // count of DISTINCT segment types in the decomposition. Returns 0..=4:
@@ -568,6 +576,7 @@ mod tests {
     #[test]
     fn score_with_breakdown_history_descendant_field_populated() {
         // Pool seed at full site_match_strength = 1.0 so raw factor delivers full credit.
+        // Candidate has depth 1 (NumberIncrement is divergence) -> decay = 0.6^1 = 0.6.
         let p = pool_with_seed_strength(1.0);
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
@@ -580,9 +589,10 @@ mod tests {
             breakdown: None,
         };
         let (_, breakdown) = score_with_breakdown(&cand, &rc, None);
-        assert_eq!(breakdown.history_descendant, 1.0);
-        assert!((breakdown.history_descendant_weighted - 0.5).abs() < 1e-6,
-            "history_descendant_weighted = W_HISTORY_DESCENDANT (0.5) when present");
+        assert!((breakdown.history_descendant - 0.6).abs() < 1e-6,
+            "1.0 strength * 0.6^1 decay = 0.6, got {}", breakdown.history_descendant);
+        assert!((breakdown.history_descendant_weighted - 0.3).abs() < 1e-6,
+            "history_descendant_weighted = W_HISTORY_DESCENDANT (0.5) * 0.6 = 0.3, got {}", breakdown.history_descendant_weighted);
         assert_eq!(breakdown.history_seed, 0.0,
             "candidate with HistoryDescendant but not HistorySeed should report history_seed = 0");
     }
@@ -664,8 +674,9 @@ mod tests {
     }
 
     #[test]
-    fn wrong_site_history_descendant_gets_quarter_bonus() {
-        // site_match_strength=0.5 × W_HISTORY_DESCENDANT (0.5) = 0.25
+    fn wrong_site_history_descendant_decays_with_depth() {
+        // strength 0.5, depth 1 (NumberIncrement) -> 0.5 * 0.6 = 0.3 raw;
+        // weighted = W_HISTORY_DESCENDANT (0.5) * 0.3 = 0.15.
         let p = pool_with_seed_strength(0.5);
         let s = HistoryStats::default();
         let c = RecoverConfig::default();
@@ -678,10 +689,29 @@ mod tests {
             breakdown: None,
         };
         let (_, bd) = score_with_breakdown(&cand, &rc, None);
-        assert!((bd.history_descendant - 0.5).abs() < 1e-6,
-            "raw history_descendant should equal site_match_strength (0.5), got {}", bd.history_descendant);
-        assert!((bd.history_descendant_weighted - 0.25).abs() < 1e-6,
-            "history_descendant_weighted should be 0.5 * 0.5 = 0.25, got {}", bd.history_descendant_weighted);
+        assert!((bd.history_descendant - 0.3).abs() < 1e-6,
+            "0.5 strength * 0.6^1 decay = 0.3, got {}", bd.history_descendant);
+        assert!((bd.history_descendant_weighted - 0.15).abs() < 1e-6,
+            "0.5 weight * 0.3 = 0.15, got {}", bd.history_descendant_weighted);
+    }
+
+    #[test]
+    fn descendant_bonus_decays_deeper_chains_more() {
+        let p = pool_with_seed_strength(1.0); // exact site, no 4.25 gating -> strength 1.0
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let mk = |prov: Vec<RuleId>| Candidate {
+            password: Zeroizing::new("PW".into()), score: 0.0, provenance: prov,
+            seed_history_id: Some(1), breakdown: None,
+        };
+        let shallow = mk(vec![RuleId::HistoryDescendant, RuleId::SpecialSuffix]); // depth 1
+        let deep = mk(vec![RuleId::HistoryDescendant, RuleId::SpecialSuffix, RuleId::SiteAffix, RuleId::NumberIncrement]); // depth 3
+        let (_, bd_shallow) = score_with_breakdown(&shallow, &rc, None);
+        let (_, bd_deep) = score_with_breakdown(&deep, &rc, None);
+        assert!((bd_shallow.history_descendant - 0.6).abs() < 1e-6, "1.0 * 0.6^1 = 0.6, got {}", bd_shallow.history_descendant);
+        assert!((bd_deep.history_descendant - 0.216).abs() < 1e-6, "1.0 * 0.6^3 = 0.216, got {}", bd_deep.history_descendant);
+        assert!(bd_deep.history_descendant < bd_shallow.history_descendant);
     }
 
     #[test]

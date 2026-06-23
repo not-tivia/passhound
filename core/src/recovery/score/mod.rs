@@ -42,6 +42,10 @@ pub const W_CLEAN_PATTERN: f32 = 0.05;
 pub const W_HISTORY_SEED: f32 = 1.0;
 pub const W_HISTORY_DESCENDANT: f32 = 0.5;
 
+/// Per-divergence-transform multiplier on the history-descendant bonus. A
+/// 1-transform variant keeps 0.6; a 5-transform chain keeps 0.6^5 ~= 0.08.
+pub const HISTORY_DESCENDANT_DECAY: f32 = 0.6;
+
 /// Phase 4.25 B1 — when the user queried a specific site, a history seed that
 /// is NOT an exact site match has its history bonus scaled by this factor
 /// (site-first ranking). Freeform recovery (no site) is unchanged.
