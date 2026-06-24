@@ -50,6 +50,11 @@ export default function Recovery({
   // settings.default_reveal do not override the user's in-view toggle.
   const [revealAll, setRevealAll] = useState(settings.default_reveal);
   const [triedIds, setTriedIds] = useState<Set<number>>(new Set());
+  // Bumped on every completed run so result rows remount with fresh per-row
+  // state. Candidate ranks repeat (1..N) across runs, so keying rows by rank
+  // alone makes React reuse instances and keep a previous run's revealed
+  // plaintext for the same rank. The run sequence makes each run's rows distinct.
+  const [runSeq, setRunSeq] = useState(0);
 
   const hasRunOnce = useRef<boolean>(false);
 
@@ -60,6 +65,7 @@ export default function Recovery({
       const result = await api.recoverCandidates(next);
       setCandidates(result);
       setTriedIds(new Set()); // Fresh run = fresh tried state.
+      setRunSeq((n) => n + 1); // Fresh run = remount result rows (drop stale revealed text).
       hasRunOnce.current = true;
     } catch (e) {
       const err = e as GuiError;
@@ -115,6 +121,7 @@ export default function Recovery({
       </div>
       <RecoveryResults
         candidates={candidates}
+        runSeq={runSeq}
         loading={loading}
         error={
           error?.kind === "EmptyVault"

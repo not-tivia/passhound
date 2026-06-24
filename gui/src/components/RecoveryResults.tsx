@@ -3,6 +3,7 @@ import CandidateRow from "./CandidateRow";
 
 interface RecoveryResultsProps {
   candidates: CandidateView[] | null;
+  runSeq: number;
   loading: boolean;
   error: { kind: "EmptyVault" } | { kind: "Other"; message: string } | null;
   revealAll: boolean;
@@ -15,6 +16,7 @@ interface RecoveryResultsProps {
 
 export default function RecoveryResults({
   candidates,
+  runSeq,
   loading,
   error,
   revealAll,
@@ -85,7 +87,7 @@ export default function RecoveryResults({
             </div>
             {candidates.map((c) => (
               <CandidateRow
-                key={c.rank}
+                key={`${runSeq}-${c.rank}`}
                 candidate={c}
                 revealed={revealAll}
                 tried={triedIds.has(c.rank)}
