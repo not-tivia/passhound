@@ -26,8 +26,8 @@ html, body, #root {
 body {
   background: var(--bg-0);
   color: var(--text-1);
-  font-family: ui-monospace, SFMono-Regular, "Menlo", "Monaco", "Consolas", monospace;
-  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -97,13 +97,13 @@ select option {
   color: var(--text-0);
   font-weight: 600;
   text-align: center;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .lock-subtitle {
   color: var(--text-3);
   text-align: center;
-  font-size: 11px;
+  font-size: 13px;
   margin-bottom: 8px;
 }
 
@@ -112,7 +112,7 @@ select option {
   border: 1px solid var(--border);
   color: var(--text-1);
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: 14px;
   outline: none;
 }
 
@@ -125,7 +125,7 @@ select option {
   border: none;
   color: var(--text-0);
   padding: 9px;
-  font-size: 12px;
+  font-size: 14px;
   margin-top: 4px;
 }
 
@@ -143,19 +143,19 @@ select option {
   border: 1px solid #3a2a1a;
   color: var(--accent);
   padding: 7px 10px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
 .lock-error {
   color: var(--error);
-  font-size: 11px;
+  font-size: 13px;
   text-align: center;
 }
 
 .lock-path {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 12px;
   text-align: center;
   margin-top: 6px;
 }
@@ -186,7 +186,7 @@ select option {
   background: transparent;
   border: none;
   color: var(--text-1);
-  font-size: 18px;
+  font-size: 19px;
   width: 40px;
   height: 36px;
   display: flex;
@@ -226,7 +226,7 @@ select option {
   align-items: center;
   justify-content: center;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: 14px;
   padding: 20px;
 }
 
@@ -248,7 +248,7 @@ select option {
   border: 1px solid var(--border);
   color: var(--text-1);
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: 14px;
   outline: none;
 }
 
@@ -268,7 +268,7 @@ select option {
   border: 1px solid var(--border);
   color: var(--text-2);
   padding: 3px 10px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .accounts-table__pill--active {
@@ -290,7 +290,7 @@ select option {
 .accounts-table table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 14px;
   table-layout: fixed;
 }
 
@@ -299,7 +299,7 @@ select option {
   padding: 6px 10px;
   color: var(--text-3);
   font-weight: normal;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   position: sticky;
@@ -333,7 +333,7 @@ select option {
   padding: 16px;
   color: var(--text-2);
   text-align: center;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .accounts-table__status--error {
@@ -370,18 +370,18 @@ select option {
 .per-site__title {
   color: var(--text-0);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .per-site__meta {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 3px;
 }
 
 .per-site__site-notes {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 13px;
   font-style: italic;
   margin-top: 4px;
   white-space: pre-wrap;
@@ -389,7 +389,7 @@ select option {
 
 .per-site__user {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 6px;
 }
 
@@ -402,7 +402,7 @@ select option {
 
 .per-site__section-label {
   color: var(--text-3);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
   margin: 14px 0 6px;
@@ -430,20 +430,20 @@ select option {
 .per-site__date {
   margin-left: auto;
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
 .per-site__empty {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 13px;
   padding: 8px 0;
 }
 
 .per-site__status {
   padding: 20px;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 14px;
   text-align: center;
 }
 
@@ -462,7 +462,7 @@ select option {
 }
 
 .pwd-cell__value {
-  font-family: monospace;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
   color: var(--text-1);
   letter-spacing: 1.5px;
   user-select: text;
@@ -473,8 +473,8 @@ select option {
   border: none;
   color: var(--text-1);
   padding: 3px 8px;
-  font-size: 10px;
-  font-family: monospace;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
   border-radius: 2px;
 }
 
@@ -501,7 +501,7 @@ select option {
   border: 1px solid var(--border);
   color: var(--text-0);
   padding: 8px 16px;
-  font-size: 11px;
+  font-size: 13px;
   border-radius: 4px;
   pointer-events: none;
   z-index: 1000;
@@ -532,7 +532,7 @@ select option {
   border-bottom: 1px solid var(--border);
   color: var(--text-0);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .import-view__body {
@@ -553,7 +553,7 @@ select option {
 
 .import-view__label {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 13px;
   min-width: 160px;
 }
 
@@ -564,7 +564,7 @@ select option {
   border: 1px solid var(--border);
   color: var(--text-1);
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   outline: none;
 }
@@ -583,7 +583,7 @@ select option {
   border: none;
   color: var(--text-1);
   padding: 6px 14px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
 }
 
@@ -610,7 +610,7 @@ select option {
 
 .import-view__error {
   color: var(--error);
-  font-size: 11px;
+  font-size: 13px;
   padding: 8px 10px;
   background: var(--bg-1);
   border: 1px solid #3a1a1a;
@@ -634,7 +634,7 @@ select option {
 
 .col-mapping__label {
   color: var(--text-3);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -642,7 +642,7 @@ select option {
 .col-mapping__table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 14px;
   border: 1px solid var(--border);
 }
 
@@ -651,7 +651,7 @@ select option {
   padding: 6px 10px;
   color: var(--text-3);
   font-weight: normal;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   background: var(--bg-1);
@@ -669,7 +669,7 @@ select option {
   border: 1px solid var(--border);
   color: var(--text-1);
   padding: 3px 6px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
 }
 
@@ -683,7 +683,7 @@ select option {
 
 .import-preview__summary {
   color: var(--text-1);
-  font-size: 12px;
+  font-size: 14px;
   padding: 6px 10px;
   background: var(--bg-1);
   border: 1px solid var(--border);
@@ -701,7 +701,7 @@ select option {
 .import-preview__rows {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 13px;
   border: 1px solid var(--border);
 }
 
@@ -710,7 +710,7 @@ select option {
   padding: 5px 8px;
   color: var(--text-3);
   font-weight: normal;
-  font-size: 9px;
+  font-size: 11px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border);
 }
@@ -722,13 +722,13 @@ select option {
 }
 
 .import-preview__pwd {
-  font-family: monospace;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
   letter-spacing: 1.5px;
 }
 
 .import-preview__notes {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: 12px;
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -737,7 +737,7 @@ select option {
 
 .import-preview__diagnostics {
   color: var(--accent);
-  font-size: 10px;
+  font-size: 12px;
   background: var(--bg-1);
   border: 1px solid var(--border);
   padding: 6px 10px;
@@ -759,19 +759,19 @@ select option {
 
 .accounts-table__secondary {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 2px;
 }
 
 .per-site__display-name {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 4px;
 }
 
 .per-site__field-label {
   color: var(--text-3);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -791,7 +791,7 @@ select option {
   border: 1px solid var(--border);
   color: var(--text-1);
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: 14px;
   font-family: inherit;
   flex-shrink: 0;
 }
@@ -836,7 +836,7 @@ select option {
 
 .attachments__label {
   color: var(--text-3);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -845,7 +845,7 @@ select option {
   padding: 14px;
   border: 1px dashed var(--border);
   text-align: center;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-2);
   transition: border-color 120ms ease, background 120ms ease;
 }
@@ -925,7 +925,7 @@ select option {
   font-size: 28px;
 }
 .attachment-card__placeholder-hint {
-  font-size: 10px;
+  font-size: 12px;
   opacity: 0.7;
   color: var(--text-3);
 }
@@ -938,7 +938,7 @@ select option {
 
 .attachment-card__filename {
   color: var(--text-1);
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -946,7 +946,7 @@ select option {
 
 .attachment-card__size {
   color: var(--text-3);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .attachment-card__delete {
@@ -958,7 +958,7 @@ select option {
   color: var(--text-0);
   width: 18px;
   height: 18px;
-  font-size: 11px;
+  font-size: 13px;
   padding: 0;
   display: none;
   cursor: pointer;
@@ -987,7 +987,7 @@ select option {
 
 .attachment-viewer__error {
   color: var(--error);
-  font-size: 12px;
+  font-size: 14px;
   background: var(--bg-1);
   padding: 10px 16px;
   border: 1px solid var(--border);
@@ -1009,7 +1009,7 @@ select option {
   border: 1px solid #5a2a2a;
   color: var(--error);
   padding: 4px 10px;
-  font-size: 10px;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1045,7 +1045,7 @@ select option {
   border: 1px solid #3a3a44;
   border-radius: 10px;
   padding: 1px 8px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1);
   user-select: none;
 }
@@ -1061,7 +1061,7 @@ select option {
   color: inherit;
   cursor: pointer;
   padding: 0 0 0 2px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1;
 }
 .tag-chip__remove:hover { color: var(--error); }
@@ -1083,7 +1083,7 @@ select option {
   padding: 6px 10px;
   color: var(--text-0);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
   outline: none;
 }
 .tag-picker__list {
@@ -1095,7 +1095,7 @@ select option {
 }
 .tag-picker__option {
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   color: var(--text-1);
 }
@@ -1126,13 +1126,13 @@ select option {
   padding: 10px 12px;
   border-bottom: 1px solid #2a2a32;
 }
-.tags-sidebar__title { font-weight: bold; font-size: 11px; }
+.tags-sidebar__title { font-weight: bold; font-size: 13px; }
 .tags-sidebar__manage {
   background: transparent;
   border: none;
   color: var(--text-1, #d0d0d8);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
 }
 .tags-sidebar__manage:hover { color: var(--text-0); }
 .tags-sidebar__clear {
@@ -1141,7 +1141,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-1);
   padding: 4px 8px;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 .tags-sidebar__list { list-style: none; margin: 0; padding: 4px 0; }
@@ -1152,15 +1152,15 @@ select option {
   gap: 4px;
   padding: 4px 12px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
 }
 .tags-sidebar__row:hover { background: #1a1a22; }
 .tags-sidebar__row--active { background: #2a3a4a; }
-.tags-sidebar__check { font-size: 10px; color: var(--accent, #6aa8d4); }
-.tags-sidebar__count { color: var(--text-1); font-size: 10px; }
+.tags-sidebar__check { font-size: 12px; color: var(--accent, #6aa8d4); }
+.tags-sidebar__count { color: var(--text-1); font-size: 12px; }
 .tags-sidebar__empty {
   padding: 12px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-1);
   font-style: italic;
 }
@@ -1201,7 +1201,7 @@ select option {
   padding: 6px 10px;
   background: #1a1a22;
   border-top: 1px solid #3a3a44;
-  font-size: 11px;
+  font-size: 13px;
   z-index: 10;
 }
 .bulk-bar__count { font-weight: bold; margin-right: 8px; }
@@ -1210,7 +1210,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-1, #d0d0d8);
   padding: 3px 8px;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
   font-family: inherit;
 }
@@ -1246,8 +1246,8 @@ select option {
   min-width: 360px;
   max-width: 520px;
 }
-.modal h2 { margin: 0 0 12px 0; font-size: 14px; }
-.modal p { font-size: 12px; line-height: 1.5; color: var(--text-1); margin: 4px 0; }
+.modal h2 { margin: 0 0 12px 0; font-size: 15px; }
+.modal p { font-size: 14px; line-height: 1.5; color: var(--text-1); margin: 4px 0; }
 .modal__warn { color: var(--error); }
 .modal__input {
   width: 100%;
@@ -1271,7 +1271,7 @@ select option {
   padding: 6px 14px;
   cursor: pointer;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 13px;
 }
 .modal__btn--danger {
   border-color: #5a2a2a !important;
@@ -1291,7 +1291,7 @@ select option {
   border: 1px dashed #3a3a44;
   color: var(--text-1, #d0d0d8);
   padding: 1px 8px;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
   border-radius: 10px;
 }
@@ -1305,16 +1305,16 @@ select option {
   gap: 8px;
   padding: 6px 4px;
   border-bottom: 1px solid #2a2a32;
-  font-size: 12px;
+  font-size: 14px;
 }
 .manage-tags__name { flex: 1; }
-.manage-tags__count { color: var(--text-1); font-size: 10px; }
+.manage-tags__count { color: var(--text-1); font-size: 12px; }
 .manage-tags__row button {
   background: transparent;
   border: 1px solid #3a3a44;
   color: var(--text-1);
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
   font-family: inherit;
 }
@@ -1329,7 +1329,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-1, #d0d0d8);
   padding: 4px 10px;
-  font-size: 10px;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1358,14 +1358,14 @@ select option {
   padding: 4px 8px;
   color: var(--text-0);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 .add-password-input button {
   background: transparent;
   border: 1px solid #3a3a44;
   color: var(--text-1);
   padding: 4px 10px;
-  font-size: 10px;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1379,24 +1379,24 @@ select option {
   align-items: center;
   margin: 14px 0;
 }
-.account-form label { font-size: 11px; color: var(--text-1); text-align: right; }
+.account-form label { font-size: 13px; color: var(--text-1); text-align: right; }
 .account-form input, .account-form textarea {
   background: #14141a;
   border: 1px solid #3a3a44;
   padding: 5px 8px;
   color: var(--text-0);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 .account-form textarea { min-height: 60px; resize: vertical; }
-.account-form__site-readonly { font-size: 12px; color: var(--text-1); }
-.account-form__error { color: var(--error); font-size: 11px; margin-top: 8px; }
+.account-form__site-readonly { font-size: 14px; color: var(--text-1); }
+.account-form__error { color: var(--error); font-size: 13px; margin-top: 8px; }
 .account-form__add-btn {
   background: transparent;
   border: 1px solid #3a3a44;
   color: var(--text-0);
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1406,7 +1406,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-0);
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   margin: 6px 10px;
@@ -1434,7 +1434,7 @@ select option {
   overflow-y: auto;
 }
 .recovery-filters__label {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1, #888);
   letter-spacing: 0.05em;
   margin-top: 8px;
@@ -1446,13 +1446,13 @@ select option {
   padding: 5px 8px;
   color: var(--text-0, #d0d0d8);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 .recovery-filters__checkbox {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-0);
   margin-top: 6px;
 }
@@ -1463,7 +1463,7 @@ select option {
   border: none;
   padding: 6px 12px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 .recovery-filters__run:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -1484,7 +1484,7 @@ select option {
   background: #14141a;
 }
 .recovery-results__status {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-1, #888);
 }
 .recovery-results__reveal {
@@ -1492,7 +1492,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-0, #d0d0d8);
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1509,7 +1509,7 @@ select option {
   padding: 24px;
   text-align: center;
   color: var(--text-1, #888);
-  font-size: 12px;
+  font-size: 14px;
 }
 .recovery-results__error { color: var(--error, #d46a6a); }
 .recovery-results__link-btn {
@@ -1518,15 +1518,15 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-0);
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
 }
 .recovery-results__link-btn:hover { background: #2a2a32; }
 
 .recovery-results__table {
-  font-family: Menlo, "Courier New", monospace;
-  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 14px;
 }
 .candidate-row {
   display: grid;
@@ -1540,7 +1540,7 @@ select option {
 .candidate-row:hover { background: #16161e; }
 .candidate-row--header {
   font-weight: bold;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1, #888);
   border-bottom: 1px solid #2a2a32;
 }
@@ -1552,7 +1552,7 @@ select option {
 .candidate-row__rank { color: var(--text-1, #888); }
 .candidate-row__pw { letter-spacing: 0.5px; }
 .candidate-row__why {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1, #888);
   white-space: nowrap;
   overflow: hidden;
@@ -1569,7 +1569,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-1);
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   line-height: 1;
@@ -1587,7 +1587,7 @@ select option {
   border-top: 1px solid #5a2a2a;
   color: var(--error, #d46a6a);
   padding: 8px 14px;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .per-site__recover-account {
@@ -1595,7 +1595,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-1, #d0d0d8);
   padding: 4px 10px;
-  font-size: 10px;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1621,7 +1621,7 @@ select option {
   background: #14141a;
 }
 .base-words-header__title {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-0, #d0d0d8);
 }
 .base-words-header__reanalyze,
@@ -1630,7 +1630,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-0, #d0d0d8);
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1640,7 +1640,7 @@ select option {
 .base-words-header__reveal:disabled { opacity: 0.4; cursor: not-allowed; }
 .base-words-header__count {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-1, #888);
 }
 
@@ -1663,7 +1663,7 @@ select option {
 }
 .base-words-pane__header {
   padding: 8px 14px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1, #888);
   letter-spacing: 0.05em;
 }
@@ -1674,7 +1674,7 @@ select option {
   padding: 5px 8px;
   color: var(--text-0);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 .base-words-pane__list {
   flex: 1;
@@ -1684,7 +1684,7 @@ select option {
   padding: 24px;
   text-align: center;
   color: var(--text-1, #888);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .base-word-row {
@@ -1693,8 +1693,8 @@ select option {
   align-items: center;
   gap: 8px;
   padding: 3px 14px;
-  font-family: Menlo, "Courier New", monospace;
-  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 14px;
   border-bottom: 1px solid #1a1a22;
 }
 .base-word-row:hover { background: #16161e; }
@@ -1705,7 +1705,7 @@ select option {
   color: var(--text-1, #888);
 }
 .base-word-row__badge {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-1, #888);
   text-transform: uppercase;
 }
@@ -1720,7 +1720,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-1);
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   line-height: 1;
@@ -1740,12 +1740,12 @@ select option {
   overflow-y: auto;
 }
 .settings__title {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-0, #d0d0d8);
   margin-bottom: 18px;
 }
 .settings__footnote {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1, #888);
   margin-top: 18px;
   font-style: italic;
@@ -1755,7 +1755,7 @@ select option {
   margin-bottom: 18px;
 }
 .settings-section__title {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1, #888);
   letter-spacing: 0.08em;
   margin-bottom: 10px;
@@ -1776,7 +1776,7 @@ select option {
   padding: 4px 0;
 }
 .settings-row__label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-0, #d0d0d8);
 }
 .settings-row__input {
@@ -1785,17 +1785,17 @@ select option {
   padding: 4px 8px;
   color: var(--text-0);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 .settings-row__checkbox {
   justify-self: start;
 }
 .settings-row__unit {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-1, #888);
 }
 .settings-row__hint {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-1, #888);
   font-style: italic;
 }
@@ -1809,7 +1809,7 @@ select option {
   border: 1px solid #3a3a44;
   color: var(--text-0, #d0d0d8);
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -1821,7 +1821,7 @@ select option {
 .modal--confirm-reunlock .modal__body-text {
   margin: 14px 0 0;
   color: var(--text-0, #d0d0d8);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
@@ -1865,7 +1865,7 @@ select option {
 .modal--reset-learning .modal__body-text {
   margin: 14px 0 0;
   color: var(--text-0, #d0d0d8);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
@@ -1890,7 +1890,7 @@ select option {
   max-width: 400px;
 }
 .popover__header {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   margin-bottom: 12px;
   color: var(--text-0, #d0d0d8);
@@ -1898,7 +1898,7 @@ select option {
 .popover__field { margin: 8px 0; }
 .popover__field label {
   display: block;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-1, #a0a0a8);
   margin-bottom: 4px;
 }
@@ -1910,18 +1910,18 @@ select option {
   margin: 8px 0;
 }
 .popover__checks label {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-0, #d0d0d8);
 }
 .popover__avoid {
   display: block;
   margin: 8px 0;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-1, #a0a0a8);
 }
 .popover__output {
-  font-family: monospace;
-  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 14px;
   background: var(--surface-0, #0e0e14);
   padding: 8px;
   margin: 8px 0;
@@ -1930,7 +1930,7 @@ select option {
 }
 .popover__error {
   color: #d46a6a;
-  font-size: 11px;
+  font-size: 13px;
   margin: 8px 0;
 }
 .popover__actions {
@@ -1965,8 +1965,8 @@ select option {
 }
 
 .pwd-cell__edit-input {
-  font-family: monospace;
-  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 14px;
   width: 200px;
   background: #14141a;
   border: 1px solid #3a3a44;
@@ -1983,7 +1983,7 @@ select option {
 
 /* Phase 4.14 — base-words header additions */
 .base-words__sort-select {
-  font-size: 11px;
+  font-size: 13px;
   background: var(--surface-1, #1a1a20);
   color: var(--text-0, #d0d0d8);
   border: 1px solid var(--border, #2a2a30);
@@ -2140,7 +2140,7 @@ select option {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: monospace;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
   font-size: 0.75rem;
   color: var(--text-3);
 }
