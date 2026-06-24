@@ -64,5 +64,6 @@ pub struct ScoreBreakdown {
     pub history_seed: f32, pub history_seed_weighted: f32,
     pub history_descendant: f32, pub history_descendant_weighted: f32,
     pub multiplier: f32,
+    pub rule_fit: f32,
     pub total: f32,
 }

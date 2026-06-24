@@ -180,6 +180,23 @@ pub fn score_with_breakdown(
     };
     total *= multiplier;
 
+    // Phase 4.27: corpus-fit. Scale generated candidates by the PRODUCT of their
+    // divergence rules' fit-to-the-user's-corpus. A rule the user never uses
+    // (e.g. SiteAffix ~ 0.02) tanks the candidate. Verbatim seeds have no
+    // divergence rules -> product over empty = 1.0 (unaffected).
+    let rule_fit: f32 = {
+        let rf = &ctx.stats.rule_fit;
+        if rf.is_empty() {
+            1.0
+        } else {
+            c.provenance.iter()
+                .filter(|r| DIVERGENCE_RULES.contains(r))
+                .map(|r| rf.get(r).copied().unwrap_or(1.0))
+                .product()
+        }
+    };
+    total *= rule_fit;
+
     let breakdown = crate::recovery::score::ScoreBreakdown {
         site, site_weighted,
         hint, hint_weighted,
@@ -191,6 +208,7 @@ pub fn score_with_breakdown(
         history_seed, history_seed_weighted,
         history_descendant, history_descendant_weighted,
         multiplier,
+        rule_fit,
         total,
     };
     (total, breakdown)
@@ -855,6 +873,65 @@ mod tests {
     }
 
     // Phase 4.26 ---------------------------------------------------------------
+
+    // Phase 4.27 ---------------------------------------------------------------
+
+    fn stats_with_rule_fit(pairs: &[(RuleId, f32)]) -> HistoryStats {
+        let mut s = HistoryStats::default();
+        for (r, f) in pairs { s.rule_fit.insert(*r, *f); }
+        s
+    }
+
+    #[test]
+    fn siteaffix_candidate_scored_near_zero_when_unused() {
+        let p = pool_with_seed_strength(1.0);
+        let s = stats_with_rule_fit(&[(RuleId::SiteAffix, 0.02), (RuleId::SpecialSuffix, 1.0)]);
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let with_affix = Candidate {
+            password: Zeroizing::new("RGpw".into()), score: 0.0,
+            provenance: vec![RuleId::HistoryDescendant, RuleId::SiteAffix],
+            seed_history_id: Some(1), breakdown: None,
+        };
+        let without_affix = Candidate {
+            password: Zeroizing::new("pw!".into()), score: 0.0,
+            provenance: vec![RuleId::HistoryDescendant, RuleId::SpecialSuffix],
+            seed_history_id: Some(1), breakdown: None,
+        };
+        let sa = score(&with_affix, &rc, None);
+        let na = score(&without_affix, &rc, None);
+        assert!(sa < na * 0.1, "SiteAffix candidate ({sa}) should be far below the non-affix one ({na})");
+    }
+
+    #[test]
+    fn verbatim_seed_unaffected_by_rule_fit() {
+        let p = pool_with_seed_strength(1.0);
+        let s = stats_with_rule_fit(&[(RuleId::SiteAffix, 0.02)]);
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let seed = Candidate {
+            password: Zeroizing::new("pw".into()), score: 0.0,
+            provenance: vec![RuleId::HistorySeed], seed_history_id: Some(1), breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&seed, &rc, None);
+        assert!((bd.rule_fit - 1.0).abs() < 1e-6, "a verbatim seed has no divergence rules -> rule_fit multiplier 1.0");
+    }
+
+    #[test]
+    fn empty_rule_fit_is_neutral() {
+        // Default HistoryStats (empty rule_fit) must not change scores (back-compat).
+        let p = pool_with_seed_strength(1.0);
+        let s = HistoryStats::default();
+        let c = RecoverConfig::default();
+        let rc = RecoverContext { vault: dummy_vault(), config: &c, pool: &p, stats: &s };
+        let cand = Candidate {
+            password: Zeroizing::new("pw".into()), score: 0.0,
+            provenance: vec![RuleId::HistoryDescendant, RuleId::SiteAffix],
+            seed_history_id: Some(1), breakdown: None,
+        };
+        let (_, bd) = score_with_breakdown(&cand, &rc, None);
+        assert!((bd.rule_fit - 1.0).abs() < 1e-6, "missing rule_fit entries default to 1.0 (neutral)");
+    }
 
     #[test]
     fn transform_depth_counts_only_divergence_rules() {
