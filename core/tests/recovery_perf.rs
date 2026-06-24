@@ -4,7 +4,7 @@ use passhound_core::{recover, RecoverConfig};
 use std::time::Instant;
 
 #[test]
-fn perf_under_500ms_on_synthetic_fixture() {
+fn perf_within_debug_budget_on_synthetic_fixture() {
     let (_t, v, _) = common::build_vault_from_fixture();
     // Cold pre-warm (Argon2 already ran during Vault::create + analyze).
     let cfg = RecoverConfig { limit: 100, ..Default::default() };
