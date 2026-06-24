@@ -34,8 +34,12 @@ enum Command {
     BaseWord(commands::base_word::BaseWordArgs),
     /// Manage user-defined life eras.
     Era(commands::era::EraArgs),
-    /// Diagnostic: flag current passwords that are site-affix copies of another stored password.
-    Audit,
+    /// Diagnostic: flag site-affix-duplicate stored passwords; with --site, dump recovery candidate origins.
+    Audit {
+        /// Show the recovery origin breakdown (this-site seed / other-site seed / generated) for this site.
+        #[arg(long)]
+        site: Option<String>,
+    },
 }
 
 fn default_vault_path() -> PathBuf {
@@ -57,6 +61,6 @@ fn main() -> anyhow::Result<()> {
         Command::Analyze(args) => commands::analyze::run(&vault_path, args),
         Command::BaseWord(args) => commands::base_word::run(&vault_path, args),
         Command::Era(args) => commands::era::run(&vault_path, args),
-        Command::Audit => commands::audit::run(&vault_path),
+        Command::Audit { site } => commands::audit::run(&vault_path, site),
     }
 }

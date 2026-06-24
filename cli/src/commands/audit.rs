@@ -19,7 +19,7 @@ struct Row {
     site: String,
 }
 
-pub fn run(path: &Path) -> Result<()> {
+pub fn run(path: &Path, site: Option<String>) -> Result<()> {
     if !path.exists() {
         anyhow::bail!("vault not found at {}", path.display());
     }
@@ -157,6 +157,44 @@ pub fn run(path: &Path) -> Result<()> {
         }
     }
     println!("  (fabricated > 0  => engine bug confirmed;  fabricated = 0  => HIST tags are all real, issue is elsewhere)");
+
+    // --- Per-site recovery origin breakdown (--site) ----------------------
+    // For each top candidate of the queried site: is it from THIS site's seeds,
+    // another site's seeds, or purely generated? Plus the WHY tags. No plaintext.
+    if let Some(site) = site {
+        let mut hid2site: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+        {
+            let mut st = vault.conn().prepare(
+                "SELECT ph.id, s.name FROM password_history ph
+                 JOIN accounts a ON a.id = ph.account_id
+                 JOIN sites s ON s.id = a.site_id
+                 WHERE ph.retired_at IS NULL",
+            )?;
+            for row in st
+                .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                .flatten()
+            {
+                hid2site.insert(row.0, row.1);
+            }
+        }
+        println!("\n=== Recovery origin breakdown for site = {site:?} (top 20; NO passwords shown) ===");
+        let cfg = RecoverConfig { site: Some(site.clone()), limit: 20, ..Default::default() };
+        match recover(&vault, cfg) {
+            Ok(cands) => {
+                println!("RANK SCORE  ORIGIN                  WHY");
+                for (i, c) in cands.iter().enumerate() {
+                    let origin = match c.seed_history_id.and_then(|h| hid2site.get(&h)) {
+                        Some(s) if s.eq_ignore_ascii_case(&site) => "seed:THIS-SITE".to_string(),
+                        Some(s) => format!("seed:{s}"),
+                        None => "generated".to_string(),
+                    };
+                    let tags: Vec<&str> = c.provenance.iter().map(|r| r.tag()).collect();
+                    println!("#{:<3} {:>5.2} {:<23} {}", i + 1, c.score, origin, tags.join("+"));
+                }
+            }
+            Err(e) => println!("recover error: {e}"),
+        }
+    }
     Ok(())
 }
 
