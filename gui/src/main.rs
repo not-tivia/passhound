@@ -63,6 +63,9 @@ fn main() {
             update_site,
             list_site_merge_groups,
             merge_sites,
+            merge_named_sites,
+            list_site_aliases,
+            delete_site_alias,
             generate_password,
             add_base_word,
         ])

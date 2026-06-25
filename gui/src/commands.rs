@@ -2015,6 +2015,55 @@ pub fn merge_sites_inner(state: &VaultState, groups: &[MergeRequest]) -> Result<
     Ok(out)
 }
 
+#[derive(Serialize, Debug, Clone)]
+pub struct SiteAliasView {
+    pub id: i64,
+    pub original_name: String,
+    pub site_id: i64,
+}
+
+#[tauri::command]
+pub fn merge_named_sites(state: State<'_, VaultState>, survivor_id: i64, loser_ids: Vec<i64>) -> Result<MergeResultView, GuiError> {
+    merge_named_sites_inner(&state, survivor_id, &loser_ids)
+}
+
+pub fn merge_named_sites_inner(state: &VaultState, survivor_id: i64, loser_ids: &[i64]) -> Result<MergeResultView, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let r = passhound_core::repo::sites::merge_named_sites(v, survivor_id, loser_ids)?;
+    Ok(MergeResultView { groups_merged: r.groups_merged, rows_removed: r.rows_removed, accounts_repointed: r.accounts_repointed, skipped: 0 })
+}
+
+#[tauri::command]
+pub fn list_site_aliases(state: State<'_, VaultState>) -> Result<Vec<SiteAliasView>, GuiError> {
+    list_site_aliases_inner(&state)
+}
+
+pub fn list_site_aliases_inner(state: &VaultState) -> Result<Vec<SiteAliasView>, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    // Aliases across all sites (the per-site view filters client-side).
+    let mut out = Vec::new();
+    for s in passhound_core::repo::sites::list(v)? {
+        for a in passhound_core::repo::site_aliases::list_for_site(v, s.id)? {
+            out.push(SiteAliasView { id: a.id, original_name: a.original_name, site_id: a.site_id });
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn delete_site_alias(state: State<'_, VaultState>, alias_id: i64) -> Result<(), GuiError> {
+    delete_site_alias_inner(&state, alias_id)
+}
+
+pub fn delete_site_alias_inner(state: &VaultState, alias_id: i64) -> Result<(), GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    passhound_core::repo::site_aliases::delete(v, alias_id)?;
+    Ok(())
+}
+
 #[derive(serde::Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratorOptionsPayload {
@@ -3694,5 +3743,23 @@ mod tests {
         ]).unwrap();
         assert_eq!(res.groups_merged, 1);
         assert_eq!(res.skipped, 1);
+    }
+
+    #[test]
+    fn merge_named_sites_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let (survivor, loser);
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            survivor = sites::create(v, sites::NewSite { name: "RuneScape".into(), ..Default::default() }).unwrap().id;
+            loser = sites::create(v, sites::NewSite { name: "Jagex".into(), ..Default::default() }).unwrap().id;
+        }
+        let res = merge_named_sites_inner(&state, survivor, &[loser]).unwrap();
+        assert_eq!(res.rows_removed, 1);
+        let aliases = list_site_aliases_inner(&state).unwrap();
+        assert!(aliases.iter().any(|a| a.original_name == "Jagex" && a.site_id == survivor));
     }
 }
