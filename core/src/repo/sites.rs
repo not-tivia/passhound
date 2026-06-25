@@ -624,7 +624,7 @@ mod tests {
         let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
         assert_eq!(report.renamed, 1);
         assert_eq!(report.skipped_collisions, 0);
-        assert_eq!(raw_name(&v, s.id), "github");
+        assert_eq!(raw_name(&v, s.id), "github.com");
         // Original URL form preserved in the url column.
         assert_eq!(raw_url(&v, s.id).as_deref(), Some("https://www.github.com"));
     }
@@ -647,23 +647,24 @@ mod tests {
 
     #[test]
     fn cleanup_skips_collisions() {
-        // Both "https://www.github.com" and a separate "github" exist. Rewriting
-        // the URL row would collide with the bare row — skip it.
+        // "https://www.github.com" wants to rename to "github.com", but a
+        // separate "github.com" row already occupies that canonical slot —
+        // both canonicalize to "github.com", so the URL row is skipped.
         let (_tmp, v) = vault();
         clear_cleanup_flag(&v);
         let url_row = create(&v, NewSite {
             name: "https://www.github.com".into(), ..Default::default()
         }).unwrap();
         let bare_row = create(&v, NewSite {
-            name: "GitHub".into(), ..Default::default()
+            name: "github.com".into(), ..Default::default()
         }).unwrap();
         let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
         assert_eq!(report.renamed, 0);
         assert_eq!(report.skipped_collisions, 1);
         // URL row left unchanged.
         assert_eq!(raw_name(&v, url_row.id), "https://www.github.com");
-        // Bare row also untouched.
-        assert_eq!(raw_name(&v, bare_row.id), "GitHub");
+        // Already-clean row also untouched.
+        assert_eq!(raw_name(&v, bare_row.id), "github.com");
     }
 
     #[test]
@@ -680,7 +681,7 @@ mod tests {
         assert_eq!(second.renamed, 0);
         assert_eq!(second.skipped_collisions, 0);
         // And the row stayed canonical.
-        assert_eq!(raw_name(&v, s.id), "github");
+        assert_eq!(raw_name(&v, s.id), "github.com");
     }
 
     #[test]
@@ -711,7 +712,7 @@ mod tests {
         }).unwrap();
         let report = cleanup_url_shaped_site_names(v.conn()).unwrap();
         assert_eq!(report.renamed, 1);
-        assert_eq!(raw_name(&v, s.id), "github");
+        assert_eq!(raw_name(&v, s.id), "github.com");
         // Existing url preserved, not replaced with the original name.
         assert_eq!(raw_url(&v, s.id).as_deref(), Some("https://github.com/explicit-url"));
     }
@@ -750,17 +751,17 @@ mod tests {
     #[test]
     fn find_merge_groups_lists_only_multi_row_canonicals() {
         let (_tmp, v) = vault();
-        // Two rows that canonicalize to "github"
+        // Two rows that canonicalize to "github.com"
         let url = create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
-        create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        create(&v, NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
         // A lone site -> not a group
-        create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
         // Give the URL row one account so counts are exercised
         accounts::create(&v, NewAccount { site_id: url.id, username: Some("me".into()), ..Default::default() }).unwrap();
 
         let groups = find_merge_groups(&v).unwrap();
         assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].canonical, "github");
+        assert_eq!(groups[0].canonical, "github.com");
         assert_eq!(groups[0].members.len(), 2);
         assert_eq!(groups[0].total_accounts, 1);
     }
@@ -769,10 +770,10 @@ mod tests {
     fn find_merge_groups_picks_already_clean_survivor() {
         let (_tmp, v) = vault();
         create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
-        let clean = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        let clean = create(&v, NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
         let groups = find_merge_groups(&v).unwrap();
-        assert_eq!(groups[0].survivor_id, clean.id, "the already-clean 'github' row wins");
-        assert_eq!(groups[0].clean_name, "github");
+        assert_eq!(groups[0].survivor_id, clean.id, "the already-clean 'github.com' row wins");
+        assert_eq!(groups[0].clean_name, "github.com");
         assert_eq!(groups[0].members[0].site_id, clean.id, "survivor listed first");
     }
 
@@ -780,7 +781,7 @@ mod tests {
     fn merge_sites_repoints_accounts_and_deletes_losers() {
         let (_tmp, v) = vault();
         let url = create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
-        let clean = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        let clean = create(&v, NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
         let a = accounts::create(&v, NewAccount { site_id: url.id, username: Some("me".into()), ..Default::default() }).unwrap();
 
         let res = merge_sites(&v, clean.id, &[url.id]).unwrap();
@@ -789,7 +790,7 @@ mod tests {
         assert_eq!(res.accounts_repointed, 1);
 
         assert!(matches!(get(&v, url.id), Err(Error::NotFound)), "loser row deleted");
-        assert_eq!(get(&v, clean.id).unwrap().name, "github", "survivor renamed to clean brand");
+        assert_eq!(get(&v, clean.id).unwrap().name, "github.com", "survivor renamed to registrable domain");
         let under = accounts::list_for_site(&v, clean.id, &[]).unwrap();
         assert_eq!(under.len(), 1);
         assert_eq!(under[0].id, a.id, "account now under survivor");
@@ -798,7 +799,7 @@ mod tests {
     #[test]
     fn merge_sites_backfills_empty_survivor_fields() {
         let (_tmp, v) = vault();
-        let survivor = create(&v, NewSite { name: "github".into(), category: None, ..Default::default() }).unwrap();
+        let survivor = create(&v, NewSite { name: "github.com".into(), category: None, ..Default::default() }).unwrap();
         let loser = create(&v, NewSite {
             name: "https://github.com".into(),
             category: Some("Dev".into()),
@@ -815,7 +816,7 @@ mod tests {
     fn merge_sites_preserves_password_history() {
         let (_tmp, v) = vault();
         let loser = create(&v, NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
-        let survivor = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        let survivor = create(&v, NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
         let a = accounts::create(&v, NewAccount { site_id: loser.id, username: Some("me".into()), ..Default::default() }).unwrap();
         passwords::insert(&v, NewPassword {
             account_id: a.id,
@@ -839,8 +840,8 @@ mod tests {
     #[test]
     fn merge_sites_rejects_cross_canonical_or_unknown_ids() {
         let (_tmp, v) = vault();
-        let gh = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
-        let rd = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let gh = create(&v, NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
+        let rd = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
         assert!(matches!(merge_sites(&v, gh.id, &[rd.id]), Err(Error::InvalidInput(_))), "cross-canonical rejected");
         assert!(matches!(merge_sites(&v, gh.id, &[9999]), Err(Error::NotFound)), "unknown loser rejected");
         assert!(matches!(merge_sites(&v, gh.id, &[gh.id]), Err(Error::InvalidInput(_))), "survivor-as-loser rejected");
@@ -908,10 +909,10 @@ mod tests {
     #[test]
     fn resolve_for_import_dedups_by_canonical() {
         let (_tmp, v) = vault();
-        let z = create(&v, NewSite { name: "zotacstore".into(), ..Default::default() }).unwrap();
-        // A URL-shaped re-import of the same brand finds the existing site by
-        // canonical name (the Chrome re-import "everything is new" fix).
-        assert_eq!(resolve_for_import(&v, "zotacstore.com").unwrap(), Some(z.id));
+        let z = create(&v, NewSite { name: "zotacstore.com".into(), ..Default::default() }).unwrap();
+        // A URL-shaped re-import of the same registrable domain finds the existing
+        // site by canonical name (the Chrome re-import "everything is new" fix).
+        assert_eq!(resolve_for_import(&v, "www.zotacstore.com").unwrap(), Some(z.id));
         assert_eq!(resolve_for_import(&v, "https://www.zotacstore.com/login").unwrap(), Some(z.id));
         // A genuinely new brand still returns None.
         assert_eq!(resolve_for_import(&v, "brandnewsite.com").unwrap(), None);

@@ -2,35 +2,24 @@
 //! derivation + match comparison) and `repo::sites` (one-shot cleanup of
 //! URL-shaped stored names). Neutral module to avoid a repo<->recovery cycle.
 
-/// Recognized single-label public TLDs. Extend as real data requires.
-const TLDS: &[&str] = &[
-    "com", "org", "io", "net", "co", "app", "me", "edu", "gov", "info",
-    "gg", "tv", "us", "uk", "ca", "de", "fr", "jp", "au", "dev", "xyz",
-];
-/// Second-level labels that precede a ccTLD in a compound TLD (co.uk, com.au).
-const COMPOUND_SECOND_LEVEL: &[&str] = &["co", "com", "org", "net", "gov", "ac"];
-
-fn is_tld(s: &str) -> bool {
-    TLDS.iter().any(|t| s.eq_ignore_ascii_case(t))
-}
-fn is_compound_second_level(s: &str) -> bool {
-    COMPOUND_SECOND_LEVEL.iter().any(|t| s.eq_ignore_ascii_case(t))
-}
-
 /// Strip URL noise from a site name while preserving original case.
 ///
 /// Handles two URL families:
 /// - Standard web: removes `http(s)://`, path/query/fragment, port, `www.`,
-///   and extracts the brand (rightmost segment after dropping recognized TLD
-///   and compound second-level labels). Subdomains are discarded.
+///   then looks up the registrable domain (eTLD+1) via the Public Suffix List.
+///   Subdomains are collapsed: `auth.riotgames.com` -> `riotgames.com`,
+///   `us.battle.net` -> `battle.net`.  If the host has no public suffix
+///   (bare names like `zotacstore`, pseudo-hosts like `us.battle`), the cleaned
+///   host is kept as-is.
 /// - Google Password Manager Android entries (`android://<cert>==@<pkg>/`):
 ///   extracts the package brand segment (e.g. `com.tumblr` -> `tumblr`,
 ///   `com.jagex.oldscape.android` -> `jagex`).
 ///
-/// "https://www.GitHub.com"                       -> "GitHub"
-/// "auth.riotgames.com"                           -> "riotgames"
-/// "https://www.amazon.co.uk"                     -> "amazon"
-/// "us.battle"                                    -> "battle"
+/// "https://www.GitHub.com"                       -> "GitHub.com"
+/// "auth.riotgames.com"                           -> "riotgames.com"
+/// "us.battle.net"                                -> "battle.net"
+/// "https://www.amazon.co.uk"                     -> "amazon.co.uk"
+/// "us.battle"                                    -> "us.battle"
 /// "android://abc==@com.tumblr/"                  -> "tumblr"
 /// "android://xyz==@com.jagex.oldscape.android/"  -> "jagex"
 /// "  Tumblr  "                                   -> "Tumblr"
@@ -53,20 +42,16 @@ pub fn strip_url_noise(name: &str) -> String {
     let s = s.split(['/', '?', '#']).next().unwrap_or("");
     let s = s.split(':').next().unwrap_or("");
     let s = if s.len() >= 4 && s[..4].eq_ignore_ascii_case("www.") { &s[4..] } else { s };
-    let mut segs: Vec<&str> = s.split('.').filter(|p| !p.is_empty()).collect();
-    if segs.is_empty() {
-        return String::new();
+
+    // Registrable domain (eTLD+1) via the Public Suffix List: collapses
+    // subdomains (us.battle.net -> battle.net) while keeping the real domain.
+    // The returned slice is from the original host, so case is preserved.
+    match psl::domain_str(s) {
+        Some(registrable) => registrable.to_string(),
+        // No public suffix (bare names like "zotacstore", or pseudo-hosts like
+        // "us.battle"): keep the cleaned host as-is rather than invent a brand.
+        None => s.to_string(),
     }
-    // Drop a recognized TLD (and a compound second-level label if present),
-    // but never reduce to nothing.
-    if segs.len() >= 2 && is_tld(segs[segs.len() - 1]) {
-        segs.pop();
-        if segs.len() >= 2 && is_compound_second_level(segs[segs.len() - 1]) {
-            segs.pop();
-        }
-    }
-    // Brand = rightmost remaining segment; earlier segments are subdomains.
-    segs.last().unwrap().to_string()
 }
 
 fn is_org_tld(s: &str) -> bool {
@@ -76,12 +61,9 @@ fn is_org_tld(s: &str) -> bool {
     )
 }
 
-/// Canonical equality key: the brand, lowercased, alphanumerics only.
-/// "Riot games" and "auth.riotgames.com" both canonicalize to "riotgames".
+/// Canonical equality key: the registrable domain (eTLD+1), lowercased.
+/// "us.battle.net" and "eu.battle.net" both canonicalize to "battle.net".
+/// Cross-brand grouping (battle.net under Blizzard) is handled by site aliases.
 pub fn canonical_site_name(name: &str) -> String {
-    strip_url_noise(name)
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .flat_map(|c| c.to_lowercase())
-        .collect()
+    strip_url_noise(name).to_lowercase()
 }

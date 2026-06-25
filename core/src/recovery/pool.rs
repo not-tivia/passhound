@@ -216,7 +216,9 @@ pub use crate::site_name::{canonical_site_name, strip_url_noise};
 /// "https://www.GitHub.com"  -> ["GH", "Git"]
 pub fn derive_abbreviations(name: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let stripped = strip_url_noise(name);
+    let stripped_full = strip_url_noise(name);
+    // Abbreviate from the brand label only (github.com -> "github"), not the suffix.
+    let stripped = stripped_full.split('.').next().unwrap_or(&stripped_full).to_string();
     let trimmed = stripped.trim();
     if trimmed.is_empty() { return out; }
 
@@ -289,15 +291,15 @@ mod tests {
 
     #[test]
     fn strip_url_noise_full_url() {
-        assert_eq!(strip_url_noise("https://www.github.com"), "github");
-        assert_eq!(strip_url_noise("http://github.com"), "github");
-        assert_eq!(strip_url_noise("https://www.github.com/login?next=/"), "github");
-        assert_eq!(strip_url_noise("github.com:8080"), "github");
+        assert_eq!(strip_url_noise("https://www.github.com"), "github.com");
+        assert_eq!(strip_url_noise("http://github.com"), "github.com");
+        assert_eq!(strip_url_noise("https://www.github.com/login?next=/"), "github.com");
+        assert_eq!(strip_url_noise("github.com:8080"), "github.com");
     }
 
     #[test]
     fn strip_url_noise_preserves_case() {
-        assert_eq!(strip_url_noise("https://www.GitHub.com"), "GitHub");
+        assert_eq!(strip_url_noise("https://www.GitHub.com"), "GitHub.com");
         assert_eq!(strip_url_noise("  GitHub  "), "GitHub");
     }
 
@@ -309,7 +311,7 @@ mod tests {
 
     #[test]
     fn canonical_site_name_lowercases() {
-        assert_eq!(canonical_site_name("https://www.GitHub.com"), "github");
+        assert_eq!(canonical_site_name("https://www.GitHub.com"), "github.com");
         assert_eq!(canonical_site_name("GitHub"), "github");
         assert_eq!(canonical_site_name("Tumblr"), "tumblr");
     }
@@ -384,38 +386,63 @@ mod tests {
         );
     }
 
-    // Phase 4.25 — canonicalizer redesign
+    // Phase 4.25 -> 4.30 — registrable-domain canonicalizer
 
     #[test]
-    fn brand_is_rightmost_after_tld() {
-        assert_eq!(strip_url_noise("auth.riotgames.com"), "riotgames");
-        assert_eq!(strip_url_noise("na.account.amazon.com"), "amazon");
-        assert_eq!(strip_url_noise("oldschool.runescape.com"), "runescape");
-        assert_eq!(strip_url_noise("login.aol.com"), "aol");
+    fn registrable_domain_drops_subdomains() {
+        assert_eq!(strip_url_noise("auth.riotgames.com"), "riotgames.com");
+        assert_eq!(strip_url_noise("na.account.amazon.com"), "amazon.com");
+        assert_eq!(strip_url_noise("oldschool.runescape.com"), "runescape.com");
+        assert_eq!(strip_url_noise("login.aol.com"), "aol.com");
     }
 
     #[test]
     fn no_tld_keeps_brand() {
-        // No recognized TLD -> the rightmost segment IS the brand; don't eat it.
-        assert_eq!(strip_url_noise("us.battle"), "battle");
-        assert_eq!(strip_url_noise("eu.battle"), "battle");
-        assert_eq!(strip_url_noise("account.battleon"), "battleon");
+        // No recognized public suffix -> keep as-is (no invented brand).
+        assert_eq!(strip_url_noise("us.battle"), "us.battle");
+        assert_eq!(strip_url_noise("eu.battle"), "eu.battle");
+        assert_eq!(strip_url_noise("account.battleon"), "account.battleon");
     }
 
     #[test]
     fn compound_tld_dropped() {
-        assert_eq!(strip_url_noise("amazon.co.uk"), "amazon");
-        assert_eq!(strip_url_noise("www.shop.example.com.au"), "example");
+        assert_eq!(strip_url_noise("amazon.co.uk"), "amazon.co.uk");
+        assert_eq!(strip_url_noise("www.shop.example.com.au"), "example.com.au");
     }
 
     #[test]
     fn canonical_unifies_spacing_and_subdomains() {
-        // The straggler the merge missed: spaced name vs subdomained URL.
-        assert_eq!(canonical_site_name("Riot games"), "riotgames");
-        assert_eq!(canonical_site_name("auth.riotgames.com"), "riotgames");
-        assert_eq!(canonical_site_name("Riot games"), canonical_site_name("auth.riotgames.com"));
-        // Battle family collapses too.
-        assert_eq!(canonical_site_name("us.battle"), canonical_site_name("eu.battle"));
+        // Battle subdomain family collapses to same registrable domain.
+        assert_eq!(canonical_site_name("us.battle.net"), canonical_site_name("eu.battle.net"));
+    }
+
+    // Phase 4.30 — PSL new tests
+
+    #[test]
+    fn psl_collapses_subdomains_to_registrable() {
+        assert_eq!(strip_url_noise("us.battle.net"), "battle.net");
+        assert_eq!(strip_url_noise("auth.riotgames.com"), "riotgames.com");
+        assert_eq!(strip_url_noise("wallet.celsius.network"), "celsius.network");
+        assert_eq!(strip_url_noise("my.hyonix.com"), "hyonix.com");
+        assert_eq!(strip_url_noise("https://www.amazon.co.uk"), "amazon.co.uk");
+    }
+
+    #[test]
+    fn psl_preserves_case() {
+        assert_eq!(strip_url_noise("https://www.GitHub.com"), "GitHub.com");
+    }
+
+    #[test]
+    fn no_suffix_kept_as_is() {
+        assert_eq!(strip_url_noise("zotacstore"), "zotacstore");
+        assert_eq!(strip_url_noise("us.battle"), "us.battle");
+        assert_eq!(strip_url_noise("RuneScape"), "RuneScape");
+    }
+
+    #[test]
+    fn canonical_collapses_subdomain_variants() {
+        assert_eq!(canonical_site_name("us.battle.net"), canonical_site_name("eu.battle.net"));
+        assert_eq!(canonical_site_name("us.battle.net"), "battle.net");
     }
 
     #[test]
