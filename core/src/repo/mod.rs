@@ -5,5 +5,6 @@ pub mod base_words;
 pub mod common;
 pub mod eras;
 pub mod passwords;
+pub mod site_aliases;
 pub mod sites;
 pub mod tags;

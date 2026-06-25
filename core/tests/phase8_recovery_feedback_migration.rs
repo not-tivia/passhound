@@ -21,7 +21,7 @@ fn fresh_vault_has_recovery_feedback_table_after_phase8() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(val.as_slice(), b"8");
+    assert_eq!(val.as_slice(), b"9");
 
     // Confirm the table exists by querying its columns.
     let mut stmt = conn.prepare("PRAGMA table_info(recovery_feedback)").unwrap();
