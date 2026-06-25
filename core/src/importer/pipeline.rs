@@ -129,11 +129,11 @@ pub fn commit(
         match item.classification {
             Classification::DuplicateOfTriple => continue,
             Classification::New => {
-                // Re-check site by name inside the transaction. Preview's
-                // matched_site_id was a snapshot taken before the batch ran,
-                // so earlier entries in this same CSV may have just created
-                // the same site. Without this check we'd create duplicate
-                // sites for CSVs that have multiple rows per logical site.
+                // Re-resolve the site (name -> alias -> canonical) inside the
+                // transaction. Preview's matched_site_id was a snapshot taken
+                // before the batch ran, so earlier entries in this same CSV may
+                // have just created the same site. Without this check we'd
+                // create duplicate sites for CSVs with multiple rows per site.
                 let site_id = match item.matched_site_id {
                     Some(id) => id,
                     None => match sites::resolve_for_import(vault, &item.entry.site)? {
