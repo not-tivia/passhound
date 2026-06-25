@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::repo::common;
+use crate::repo::site_aliases;
 use crate::site_name::{canonical_site_name, strip_url_noise};
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
@@ -272,6 +273,60 @@ pub fn merge_sites(vault: &Vault, survivor_id: i64, loser_ids: &[i64]) -> Result
     })
 }
 
+/// Merge `loser_ids` into `survivor_id` REGARDLESS of name (user-chosen). The
+/// survivor keeps its name. For each loser: re-point its accounts, record an
+/// alias (loser canonical -> survivor) unless the canonical already equals the
+/// survivor's, re-point the loser's own aliases onto the survivor, then delete
+/// the loser row. One transaction.
+pub fn merge_named_sites(vault: &Vault, survivor_id: i64, loser_ids: &[i64]) -> Result<MergeResult> {
+    if loser_ids.is_empty() {
+        return Err(Error::InvalidInput("no sites to merge".into()));
+    }
+    if loser_ids.contains(&survivor_id) {
+        return Err(Error::InvalidInput("survivor cannot also be a loser".into()));
+    }
+    let survivor = get(vault, survivor_id)?;
+    let survivor_canon = canonical_site_name(&survivor.name);
+
+    let mut losers: Vec<Site> = Vec::with_capacity(loser_ids.len());
+    for &lid in loser_ids {
+        losers.push(get(vault, lid)?); // NotFound propagates; NO canonical check
+    }
+
+    let conn = vault.conn();
+    let tx = conn.unchecked_transaction()?;
+
+    let mut accounts_repointed = 0usize;
+    for loser in &losers {
+        accounts_repointed += conn.execute(
+            "UPDATE accounts SET site_id = ?1 WHERE site_id = ?2",
+            params![survivor_id, loser.id],
+        )?;
+        let loser_canon = canonical_site_name(&loser.name);
+        if loser_canon != survivor_canon && !loser_canon.is_empty() {
+            site_aliases::record(vault, &loser_canon, survivor_id, &loser.name)?;
+        }
+        // Carry the loser's own aliases onto the new survivor.
+        site_aliases::repoint(vault, loser.id, survivor_id)?;
+    }
+
+    // Backfill empty survivor fields from the first loser that has them (no rename).
+    let new_url = first_non_empty(survivor.url.clone(), losers.iter().map(|l| l.url.clone()));
+    let new_category = first_non_empty(survivor.category.clone(), losers.iter().map(|l| l.category.clone()));
+    let new_notes = first_non_empty(survivor.notes.clone(), losers.iter().map(|l| l.notes.clone()));
+    conn.execute(
+        "UPDATE sites SET url = ?1, category = ?2, notes = ?3 WHERE id = ?4",
+        params![new_url, new_category, new_notes, survivor_id],
+    )?;
+
+    for loser in &losers {
+        conn.execute("DELETE FROM sites WHERE id = ?1", params![loser.id])?;
+    }
+
+    tx.commit()?;
+    Ok(MergeResult { groups_merged: 1, rows_removed: loser_ids.len(), accounts_repointed })
+}
+
 /// Return `primary` if it is Some and non-blank; otherwise the first non-blank
 /// value from `fallbacks`; otherwise `primary` unchanged (preserves None/empty).
 fn first_non_empty(
@@ -415,6 +470,7 @@ mod tests {
     use super::*;
     use crate::repo::accounts::{self, NewAccount};
     use crate::repo::passwords::{self, NewPassword, Confidence};
+    use crate::repo::site_aliases;
     use tempfile::TempDir;
 
     fn vault() -> (TempDir, Vault) {
@@ -763,5 +819,49 @@ mod tests {
         assert!(matches!(merge_sites(&v, gh.id, &[rd.id]), Err(Error::InvalidInput(_))), "cross-canonical rejected");
         assert!(matches!(merge_sites(&v, gh.id, &[9999]), Err(Error::NotFound)), "unknown loser rejected");
         assert!(matches!(merge_sites(&v, gh.id, &[gh.id]), Err(Error::InvalidInput(_))), "survivor-as-loser rejected");
+    }
+
+    // Phase 4.29 ---------------------------------------------------------------
+
+    #[test]
+    fn merge_named_sites_records_alias_and_repoints() {
+        let (_tmp, v) = vault();
+        let runescape = create(&v, NewSite { name: "RuneScape".into(), ..Default::default() }).unwrap();
+        let jagex = create(&v, NewSite { name: "Jagex".into(), ..Default::default() }).unwrap();
+        let a = accounts::create(&v, NewAccount { site_id: jagex.id, username: Some("me".into()), ..Default::default() }).unwrap();
+
+        let res = merge_named_sites(&v, runescape.id, &[jagex.id]).unwrap();
+        assert_eq!(res.rows_removed, 1);
+        assert_eq!(res.accounts_repointed, 1);
+
+        // Jagex row gone; account now under RuneScape.
+        assert!(matches!(get(&v, jagex.id), Err(Error::NotFound)));
+        assert_eq!(accounts::list_for_site(&v, runescape.id, &[]).unwrap()[0].id, a.id);
+        // Survivor keeps its name (NOT renamed to a clean brand).
+        assert_eq!(get(&v, runescape.id).unwrap().name, "RuneScape");
+        // Alias jagex -> RuneScape recorded.
+        assert_eq!(site_aliases::resolve(&v, "jagex").unwrap(), Some(runescape.id));
+    }
+
+    #[test]
+    fn merge_named_sites_repoints_existing_loser_aliases() {
+        let (_tmp, v) = vault();
+        let survivor = create(&v, NewSite { name: "Survivor".into(), ..Default::default() }).unwrap();
+        let loser = create(&v, NewSite { name: "Loser".into(), ..Default::default() }).unwrap();
+        // Loser already has an alias of its own.
+        site_aliases::record(&v, "oldname", loser.id, "OldName").unwrap();
+        merge_named_sites(&v, survivor.id, &[loser.id]).unwrap();
+        // The loser's alias now points at the survivor.
+        assert_eq!(site_aliases::resolve(&v, "oldname").unwrap(), Some(survivor.id));
+        assert_eq!(site_aliases::resolve(&v, "loser").unwrap(), Some(survivor.id));
+    }
+
+    #[test]
+    fn merge_named_sites_rejects_bad_ids() {
+        let (_tmp, v) = vault();
+        let a = create(&v, NewSite { name: "A".into(), ..Default::default() }).unwrap();
+        assert!(matches!(merge_named_sites(&v, a.id, &[a.id]), Err(Error::InvalidInput(_))));
+        assert!(matches!(merge_named_sites(&v, a.id, &[9999]), Err(Error::NotFound)));
+        assert!(matches!(merge_named_sites(&v, a.id, &[]), Err(Error::InvalidInput(_))));
     }
 }
