@@ -317,3 +317,10 @@ export interface MergeRequest {
   survivor_id: number;
   loser_ids: number[];
 }
+
+// Phase 4.29 — cross-name merge
+export interface SiteAliasView {
+  id: number;
+  original_name: string;
+  site_id: number;
+}

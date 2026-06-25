@@ -8,7 +8,7 @@ import PasswordCell from "../components/PasswordCell";
 import TagChip from "../components/TagChip";
 import TagPicker from "../components/TagPicker";
 import { useToast } from "../components/Toast";
-import type { AccountDetail, GuiError, TagSummary } from "../types";
+import type { AccountDetail, GuiError, SiteAliasView, TagSummary } from "../types";
 
 interface PerSiteProps {
   accountId: number;
@@ -25,6 +25,7 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
   const [editing, setEditing] = useState(false);
   const [editSiteOpen, setEditSiteOpen] = useState(false);
   const [addingPassword, setAddingPassword] = useState(false);
+  const [aliases, setAliases] = useState<SiteAliasView[]>([]);
   const toast = useToast();
 
   const loadDetail = useCallback(() => {
@@ -42,6 +43,34 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
   useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+
+  const loadAliases = useCallback(() => {
+    api.listSiteAliases().then(
+      (all) => {
+        if (detail) setAliases(all.filter((a) => a.site_id === detail.site_id));
+      },
+      (e: GuiError) => { if (e.kind === "Locked") onLockedError(); }
+    );
+  }, [detail, onLockedError]);
+
+  useEffect(() => {
+    if (detail) {
+      api.listSiteAliases().then(
+        (all) => setAliases(all.filter((a) => a.site_id === detail.site_id)),
+        (e: GuiError) => { if (e.kind === "Locked") onLockedError(); }
+      );
+    }
+  }, [detail, onLockedError]);
+
+  const handleDeleteAlias = async (aliasId: number) => {
+    try {
+      await api.deleteSiteAlias(aliasId);
+      loadAliases();
+    } catch (e) {
+      const err = e as GuiError;
+      if (err.kind === "Locked") onLockedError();
+    }
+  };
 
   const handleDeleteAccount = async () => {
     if (!detail) return;
@@ -163,6 +192,24 @@ export default function PerSite({ accountId, onLockedError, onAccountDeleted, on
         </div>
         {detail.site_notes && detail.site_notes.trim() && (
           <div className="per-site__site-notes">{detail.site_notes}</div>
+        )}
+        {aliases.length > 0 && (
+          <div className="per-site__aliases">
+            {"also known as: "}
+            {aliases.map((a, i) => (
+              <span key={a.id}>
+                {i > 0 && ", "}
+                {a.original_name}
+                <button
+                  className="per-site__alias-remove"
+                  title={`Remove alias "${a.original_name}"`}
+                  onClick={() => handleDeleteAlias(a.id)}
+                >
+                  {"x"}
+                </button>
+              </span>
+            ))}
+          </div>
         )}
         <div className="per-site__user">
           {detail.username ?? "(no username)"}

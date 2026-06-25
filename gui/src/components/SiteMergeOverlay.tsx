@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { MergeGroupView, GuiError } from "../types";
+import type { MergeGroupView, SiteSummary, GuiError } from "../types";
 
 interface SiteMergeOverlayProps {
   onClose: () => void;
@@ -15,6 +15,11 @@ export default function SiteMergeOverlay({ onClose, onLockedError, onMutated }: 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
+  // Manual merge state
+  const [sites, setSites] = useState<SiteSummary[]>([]);
+  const [survivorId, setSurvivorId] = useState<number | null>(null);
+  const [loserId, setLoserId] = useState<number | null>(null);
+
   const handleErr = (e: unknown) => {
     if ((e as GuiError).kind === "Locked") onLockedError();
   };
@@ -27,6 +32,7 @@ export default function SiteMergeOverlay({ onClose, onLockedError, onMutated }: 
 
   useEffect(() => {
     load();
+    api.listSites().then(setSites, handleErr);
   }, []);
 
   const toggle = (set: Set<string>, key: string, setter: (s: Set<string>) => void) => {
@@ -67,6 +73,27 @@ export default function SiteMergeOverlay({ onClose, onLockedError, onMutated }: 
       handleErr(e);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const doManualMerge = async () => {
+    if (survivorId === null || loserId === null || survivorId === loserId) return;
+    const sv = sites.find((s) => s.id === survivorId);
+    const ls = sites.find((s) => s.id === loserId);
+    if (
+      !confirm(
+        `Merge "${ls?.name}" into "${sv?.name}"? Accounts move to "${sv?.name}"; "${ls?.name}" becomes an alias.`
+      )
+    )
+      return;
+    try {
+      await api.mergeNamedSites(survivorId, [loserId]);
+      setLoserId(null);
+      onMutated();
+      await load();
+      api.listSites().then(setSites, handleErr);
+    } catch (e) {
+      handleErr(e);
     }
   };
 
@@ -137,6 +164,43 @@ export default function SiteMergeOverlay({ onClose, onLockedError, onMutated }: 
             </ul>
           </>
         )}
+
+        <div className="site-merge__manual">
+          <div className="site-merge__manual-label">Manual merge (different names)</div>
+          <div className="site-merge__manual-row">
+            <div>
+              <label className="site-merge__manual-field-label">Merge into (survivor)</label>
+              <select
+                value={survivorId ?? ""}
+                onChange={(e) => setSurvivorId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">-- choose site --</option>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="site-merge__manual-field-label">Merge from (loser)</label>
+              <select
+                value={loserId ?? ""}
+                onChange={(e) => setLoserId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">-- choose site --</option>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              className="modal__btn--primary"
+              disabled={survivorId === null || loserId === null || survivorId === loserId}
+              onClick={doManualMerge}
+            >
+              Merge
+            </button>
+          </div>
+        </div>
 
         <div className="modal__actions">
           <button onClick={onClose}>Close</button>

@@ -28,6 +28,7 @@ import type {
   MergeGroupView,
   MergeResultView,
   MergeRequest,
+  SiteAliasView,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -230,4 +231,10 @@ export const api = {
   // Phase 4.24 — site merge
   listSiteMergeGroups: () => call<MergeGroupView[]>("list_site_merge_groups"),
   mergeSites: (groups: MergeRequest[]) => call<MergeResultView>("merge_sites", { groups }),
+
+  // Phase 4.29 — cross-name merge
+  mergeNamedSites: (survivorId: number, loserIds: number[]) =>
+    call<MergeResultView>("merge_named_sites", { survivorId, loserIds }),
+  listSiteAliases: () => call<SiteAliasView[]>("list_site_aliases"),
+  deleteSiteAlias: (aliasId: number) => call<void>("delete_site_alias", { aliasId }),
 };

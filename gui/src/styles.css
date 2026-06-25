@@ -2217,3 +2217,11 @@ select option {
 .site-merge__member-name { word-break: break-all; }
 .site-merge__keep { font-size: 0.7rem; background: var(--accent, #4caf50); color: #fff; border-radius: 3px; padding: 0 0.3rem; }
 .site-merge__member-count { margin-left: auto; white-space: nowrap; }
+
+/* Phase 4.29 - manual cross-name merge */
+.site-merge__manual { border-top: 1px solid var(--border, #2a2a30); margin-top: 1rem; padding-top: 1rem; }
+.site-merge__manual-label { font-size: 0.85rem; font-weight: 600; color: var(--text-2, #888); margin-bottom: 0.5rem; }
+.site-merge__manual-field-label { display: block; font-size: 0.75rem; color: var(--text-2, #888); margin-bottom: 0.2rem; }
+.site-merge__manual-row { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; }
+.per-site__aliases { font-size: 13px; color: var(--text-2, #888); margin: 0.25rem 0; }
+.per-site__alias-remove { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 2px; font-size: 12px; line-height: 1; }
