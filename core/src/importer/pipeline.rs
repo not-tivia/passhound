@@ -48,30 +48,29 @@ pub struct Preview {
 /// Vault must be unlocked (we decrypt matched passwords to detect duplicates).
 pub fn preview(vault: &Vault, entries: Vec<ImportEntry>) -> Result<Preview> {
     let _ = vault.require_key()?; // bail early if locked
-    let all_sites = sites::list(vault)?;
     let mut preview = Preview::default();
 
     for entry in entries {
-        let matched_site = all_sites.iter().find(|s| s.name == entry.site);
-        let (classification, site_id, account_id) = match matched_site {
+        let matched_site_id = sites::resolve_for_import(vault, &entry.site)?;
+        let (classification, site_id, account_id) = match matched_site_id {
             None => (Classification::New, None, None),
-            Some(site) => {
-                let accs = accounts::list_for_site(vault, site.id, &[])?;
+            Some(sid) => {
+                let accs = accounts::list_for_site(vault, sid, &[])?;
                 let target_user = entry.username.as_deref().unwrap_or("");
                 let matched_account = accs.iter().find(|a| {
                     a.username.as_deref().unwrap_or("") == target_user
                 });
                 match matched_account {
-                    None => (Classification::New, Some(site.id), None),
+                    None => (Classification::New, Some(sid), None),
                     Some(acc) => {
                         let current = passwords::current_plaintext(vault, acc.id)?;
                         match current {
-                            None => (Classification::New, Some(site.id), Some(acc.id)),
+                            None => (Classification::New, Some(sid), Some(acc.id)),
                             Some(pt) if pt.as_str() == entry.password.as_str() => {
-                                (Classification::DuplicateOfTriple, Some(site.id), Some(acc.id))
+                                (Classification::DuplicateOfTriple, Some(sid), Some(acc.id))
                             }
                             Some(_) => {
-                                (Classification::MergeWithNewPassword, Some(site.id), Some(acc.id))
+                                (Classification::MergeWithNewPassword, Some(sid), Some(acc.id))
                             }
                         }
                     }
@@ -137,8 +136,8 @@ pub fn commit(
                 // sites for CSVs that have multiple rows per logical site.
                 let site_id = match item.matched_site_id {
                     Some(id) => id,
-                    None => match sites::find_by_name(vault, &item.entry.site)? {
-                        Some(s) => s.id,
+                    None => match sites::resolve_for_import(vault, &item.entry.site)? {
+                        Some(id) => id,
                         None => {
                             let s = sites::create(
                                 vault,
@@ -746,6 +745,30 @@ mod tests {
         assert!(out.entries.is_empty());
         assert_eq!(out.diagnostics.len(), 1);
         assert_eq!(out.diagnostics[0].row, 5);
+    }
+
+    #[test]
+    fn import_routes_aliased_site_to_survivor() {
+        use crate::repo::{site_aliases, sites::{self, NewSite}};
+        let (_t, v) = vault();
+        let rs = sites::create(&v, NewSite { name: "RuneScape".into(), ..Default::default() }).unwrap();
+        site_aliases::record(&v, "jagex", rs.id, "Jagex").unwrap();
+        // Import an entry whose site is "Jagex" -> should land under RuneScape, not a new site.
+        let entries = vec![crate::importer::ImportEntry {
+            site: "Jagex".into(),
+            url: None,
+            username: Some("me".into()),
+            display_name: None,
+            password: zeroize::Zeroizing::new("pw1".into()),
+            notes: None,
+            created_at: None,
+            source_row: None,
+        }];
+        let prev = preview(&v, entries).unwrap();
+        commit(&v, prev, "test", None).unwrap();
+        // Exactly one site (RuneScape), and the account is under it.
+        assert_eq!(sites::list(&v).unwrap().len(), 1);
+        assert_eq!(accounts::list_for_site(&v, rs.id, &[]).unwrap().len(), 1);
     }
 
     #[test]

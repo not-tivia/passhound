@@ -373,6 +373,31 @@ pub struct UpdateSite {
     pub notes: Option<String>,
 }
 
+/// Resolve an incoming import site name to an existing site id:
+/// 1. exact/case-insensitive name match (find_by_name)
+/// 2. explicit alias match (canonical -> survivor)
+/// 3. canonical match against an existing site (auto-dedup: "zotacstore.com"
+///    finds existing "zotacstore", so a URL-shaped re-import does not re-add it)
+/// None -> caller creates a new site.
+pub fn resolve_for_import(vault: &Vault, name: &str) -> Result<Option<i64>> {
+    if let Some(s) = find_by_name(vault, name)? {
+        return Ok(Some(s.id));
+    }
+    let canon = canonical_site_name(name);
+    if canon.is_empty() {
+        return Ok(None);
+    }
+    if let Some(id) = crate::repo::site_aliases::resolve(vault, &canon)? {
+        return Ok(Some(id));
+    }
+    for s in list(vault)? {
+        if canonical_site_name(&s.name) == canon {
+            return Ok(Some(s.id));
+        }
+    }
+    Ok(None)
+}
+
 pub fn create(vault: &Vault, new: NewSite) -> Result<Site> {
     if new.name.trim().is_empty() {
         return Err(Error::InvalidInput("site name required".into()));
@@ -863,5 +888,32 @@ mod tests {
         assert!(matches!(merge_named_sites(&v, a.id, &[a.id]), Err(Error::InvalidInput(_))));
         assert!(matches!(merge_named_sites(&v, a.id, &[9999]), Err(Error::NotFound)));
         assert!(matches!(merge_named_sites(&v, a.id, &[]), Err(Error::InvalidInput(_))));
+    }
+
+    // Phase 4.29 Task 3 -----------------------------------------------------------
+
+    #[test]
+    fn resolve_for_import_name_then_alias() {
+        let (_tmp, v) = vault();
+        let rs = create(&v, NewSite { name: "RuneScape".into(), ..Default::default() }).unwrap();
+        // Exact/case-insensitive name match.
+        assert_eq!(resolve_for_import(&v, "runescape").unwrap(), Some(rs.id));
+        // Alias match when no name matches.
+        site_aliases::record(&v, "jagex", rs.id, "Jagex").unwrap();
+        assert_eq!(resolve_for_import(&v, "Jagex").unwrap(), Some(rs.id));
+        // Neither -> None.
+        assert_eq!(resolve_for_import(&v, "TotallyNewSite").unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_for_import_dedups_by_canonical() {
+        let (_tmp, v) = vault();
+        let z = create(&v, NewSite { name: "zotacstore".into(), ..Default::default() }).unwrap();
+        // A URL-shaped re-import of the same brand finds the existing site by
+        // canonical name (the Chrome re-import "everything is new" fix).
+        assert_eq!(resolve_for_import(&v, "zotacstore.com").unwrap(), Some(z.id));
+        assert_eq!(resolve_for_import(&v, "https://www.zotacstore.com/login").unwrap(), Some(z.id));
+        // A genuinely new brand still returns None.
+        assert_eq!(resolve_for_import(&v, "brandnewsite.com").unwrap(), None);
     }
 }
