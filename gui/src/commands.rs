@@ -3694,11 +3694,11 @@ mod tests {
             let guard = state.vault.lock().unwrap();
             let v = guard.as_ref().unwrap();
             sites::create(v, sites::NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap();
-            sites::create(v, sites::NewSite { name: "github".into(), ..Default::default() }).unwrap();
+            sites::create(v, sites::NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
         }
         let groups = list_site_merge_groups_inner(&state).unwrap();
         assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].canonical, "github");
+        assert_eq!(groups[0].canonical, "github.com");
         assert_eq!(groups[0].members.len(), 2);
     }
 
@@ -3712,9 +3712,9 @@ mod tests {
             let guard = state.vault.lock().unwrap();
             let v = guard.as_ref().unwrap();
             gh_loser = sites::create(v, sites::NewSite { name: "https://github.com".into(), ..Default::default() }).unwrap().id;
-            gh_survivor = sites::create(v, sites::NewSite { name: "github".into(), ..Default::default() }).unwrap().id;
+            gh_survivor = sites::create(v, sites::NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap().id;
             rd_loser = sites::create(v, sites::NewSite { name: "https://reddit.com".into(), ..Default::default() }).unwrap().id;
-            rd_survivor = sites::create(v, sites::NewSite { name: "reddit".into(), ..Default::default() }).unwrap().id;
+            rd_survivor = sites::create(v, sites::NewSite { name: "https://www.reddit.com".into(), ..Default::default() }).unwrap().id;
         }
         let res = merge_sites_inner(&state, &[
             MergeRequest { survivor_id: gh_survivor, loser_ids: vec![gh_loser] },
@@ -3735,7 +3735,7 @@ mod tests {
             let guard = state.vault.lock().unwrap();
             let v = guard.as_ref().unwrap();
             gh_loser = sites::create(v, sites::NewSite { name: "https://github.com".into(), ..Default::default() }).unwrap().id;
-            gh_survivor = sites::create(v, sites::NewSite { name: "github".into(), ..Default::default() }).unwrap().id;
+            gh_survivor = sites::create(v, sites::NewSite { name: "https://www.github.com".into(), ..Default::default() }).unwrap().id;
         }
         let res = merge_sites_inner(&state, &[
             MergeRequest { survivor_id: gh_survivor, loser_ids: vec![gh_loser] }, // good
