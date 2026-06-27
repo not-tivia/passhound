@@ -436,7 +436,7 @@ pub fn find_name_merge_suggestions(vault: &Vault) -> Result<Vec<NameMergeSuggest
 
         out.push(NameMergeSuggestion {
             bare_site_id: bare_id,
-            bare_name: bare_name.clone(),
+            bare_name,
             bare_account_count: counts.get(&bare_id).copied().unwrap_or(0),
             brand,
             candidates,
@@ -1125,7 +1125,9 @@ mod tests {
         add_login(&v, bare.id, "chris@example.com", "hunter2");
         add_login(&v, dom.id, "chris@example.com", "OTHER"); // pw differs
 
-        let s = &find_name_merge_suggestions(&v).unwrap()[0];
+        let sugg = find_name_merge_suggestions(&v).unwrap();
+        assert_eq!(sugg.len(), 1);
+        let s = &sugg[0];
         assert!(matches!(s.confidence, SuggestionConfidence::Review));
         assert!(matches!(s.review_reason, Some(ReviewReason::CredentialMismatch)));
         assert_eq!(s.target_site_id, Some(dom.id), "target still known, just unconfirmed");
@@ -1166,14 +1168,21 @@ mod tests {
         let ddom = create(&v, NewSite { name: "discord.com".into(), ..Default::default() }).unwrap();
         add_login(&v, dbare.id, "u@e.com", "pw");
         add_login(&v, ddom.id, "u@e.com", "pw");
-        // Review: github (no creds)
-        create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        // Review: github — 2 bare accounts, 0 domain accounts (credential mismatch
+        // -> Review). Having MORE bare accounts than discord ensures the sort is
+        // driven by the High-first primary key, not the secondary bare_account_count.
+        let gbare = create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
         create(&v, NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, gbare.id, "alice@example.com", "gh-pass-1");
+        add_login(&v, gbare.id, "bob@example.com", "gh-pass-2");
 
         let sugg = find_name_merge_suggestions(&v).unwrap();
         assert_eq!(sugg.len(), 2);
         assert!(matches!(sugg[0].confidence, SuggestionConfidence::High), "High first");
         assert!(matches!(sugg[1].confidence, SuggestionConfidence::Review));
+        // github (Review) has 2 bare accounts vs discord (High) 1: proves primary key wins.
+        assert_eq!(sugg[0].brand, "discord");
+        assert_eq!(sugg[1].brand, "github");
     }
 
     // Phase 4.29 Task 3 -----------------------------------------------------------
