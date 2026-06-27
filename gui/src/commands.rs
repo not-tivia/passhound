@@ -147,6 +147,32 @@ pub struct MergeRequest {
     pub loser_ids: Vec<i64>,
 }
 
+#[derive(Serialize, Debug, Clone)]
+pub struct DomainCandidateView {
+    pub site_id: i64,
+    pub name: String,
+    pub canonical: String,
+    pub account_count: usize,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct NameMergeSuggestionView {
+    pub bare_site_id: i64,
+    pub bare_name: String,
+    pub bare_account_count: usize,
+    pub brand: String,
+    pub candidates: Vec<DomainCandidateView>,
+    pub confidence: String,             // "High" | "Review"
+    pub review_reason: Option<String>,  // "CredentialMismatch" | "MultipleDomains"
+    pub target_site_id: Option<i64>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct NameMergePair {
+    pub bare_site_id: i64,
+    pub target_site_id: i64,
+}
+
 #[derive(Serialize)]
 pub struct AccountSummary {
     pub id: i64,
@@ -2035,6 +2061,56 @@ pub fn merge_named_sites_inner(state: &VaultState, survivor_id: i64, loser_ids: 
 }
 
 #[tauri::command]
+pub fn list_name_merge_suggestions(state: State<'_, VaultState>) -> Result<Vec<NameMergeSuggestionView>, GuiError> {
+    list_name_merge_suggestions_inner(&state)
+}
+
+pub fn list_name_merge_suggestions_inner(state: &VaultState) -> Result<Vec<NameMergeSuggestionView>, GuiError> {
+    use passhound_core::repo::sites::{SuggestionConfidence, ReviewReason};
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let sugg = passhound_core::repo::sites::find_name_merge_suggestions(v)?;
+    Ok(sugg.into_iter().map(|s| NameMergeSuggestionView {
+        bare_site_id: s.bare_site_id,
+        bare_name: s.bare_name,
+        bare_account_count: s.bare_account_count,
+        brand: s.brand,
+        candidates: s.candidates.into_iter().map(|c| DomainCandidateView {
+            site_id: c.site_id, name: c.name, canonical: c.canonical, account_count: c.account_count,
+        }).collect(),
+        confidence: match s.confidence { SuggestionConfidence::High => "High", SuggestionConfidence::Review => "Review" }.into(),
+        review_reason: s.review_reason.map(|r| match r {
+            ReviewReason::CredentialMismatch => "CredentialMismatch",
+            ReviewReason::MultipleDomains => "MultipleDomains",
+        }.into()),
+        target_site_id: s.target_site_id,
+    }).collect())
+}
+
+#[tauri::command]
+pub fn merge_name_suggestions(state: State<'_, VaultState>, pairs: Vec<NameMergePair>) -> Result<MergeResultView, GuiError> {
+    merge_name_suggestions_inner(&state, &pairs)
+}
+
+pub fn merge_name_suggestions_inner(state: &VaultState, pairs: &[NameMergePair]) -> Result<MergeResultView, GuiError> {
+    let guard = state.vault.lock().map_err(poisoned)?;
+    let v = guard.as_ref().ok_or(GuiError::Locked)?;
+    let mut out = MergeResultView::default();
+    for p in pairs {
+        // survivor = domain target, loser = bare site -> records bare name as alias.
+        match passhound_core::repo::sites::merge_named_sites(v, p.target_site_id, &[p.bare_site_id]) {
+            Ok(r) => {
+                out.groups_merged += r.groups_merged;
+                out.rows_removed += r.rows_removed;
+                out.accounts_repointed += r.accounts_repointed;
+            }
+            Err(_) => out.skipped += 1,
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
 pub fn list_site_aliases(state: State<'_, VaultState>) -> Result<Vec<SiteAliasView>, GuiError> {
     list_site_aliases_inner(&state)
 }
@@ -3761,5 +3837,51 @@ mod tests {
         assert_eq!(res.rows_removed, 1);
         let aliases = list_site_aliases_inner(&state).unwrap();
         assert!(aliases.iter().any(|a| a.original_name == "Jagex" && a.site_id == survivor));
+    }
+
+    #[test]
+    fn list_name_merge_suggestions_classifies_via_ipc() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let (bare, dom);
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            bare = sites::create(v, sites::NewSite { name: "reddit".into(), ..Default::default() }).unwrap().id;
+            dom = sites::create(v, sites::NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap().id;
+            let ab = accounts::create(v, accounts::NewAccount { site_id: bare, username: Some("u@e.com".into()), ..Default::default() }).unwrap();
+            let ad = accounts::create(v, accounts::NewAccount { site_id: dom, username: Some("u@e.com".into()), ..Default::default() }).unwrap();
+            passwords::insert(v, passwords::NewPassword { account_id: ab.id, plaintext: "pw", source: "manual".into(), confidence: passwords::Confidence::Certain, notes: None, created_at: None }).unwrap();
+            passwords::insert(v, passwords::NewPassword { account_id: ad.id, plaintext: "pw", source: "manual".into(), confidence: passwords::Confidence::Certain, notes: None, created_at: None }).unwrap();
+        }
+        let sugg = list_name_merge_suggestions_inner(&state).unwrap();
+        assert_eq!(sugg.len(), 1);
+        assert_eq!(sugg[0].bare_site_id, bare);
+        assert_eq!(sugg[0].confidence, "High");
+        assert_eq!(sugg[0].target_site_id, Some(dom));
+    }
+
+    #[test]
+    fn merge_name_suggestions_via_ipc_accumulates_and_skips_bad() {
+        let (_tmp, path) = temp_vault();
+        let state = VaultState::new();
+        vault_create_inner(&state, &path, b"hunter2").unwrap();
+        let (bare, dom);
+        {
+            let guard = state.vault.lock().unwrap();
+            let v = guard.as_ref().unwrap();
+            bare = sites::create(v, sites::NewSite { name: "reddit".into(), ..Default::default() }).unwrap().id;
+            dom = sites::create(v, sites::NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap().id;
+        }
+        let res = merge_name_suggestions_inner(&state, &[
+            NameMergePair { bare_site_id: bare, target_site_id: dom },     // good
+            NameMergePair { bare_site_id: 999999, target_site_id: dom },   // bad: NotFound loser
+        ]).unwrap();
+        assert_eq!(res.rows_removed, 1);
+        assert_eq!(res.skipped, 1);
+        // bare folded into domain, recorded as alias
+        let aliases = list_site_aliases_inner(&state).unwrap();
+        assert!(aliases.iter().any(|a| a.original_name == "reddit" && a.site_id == dom));
     }
 }

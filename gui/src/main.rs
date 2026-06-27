@@ -64,6 +64,8 @@ fn main() {
             list_site_merge_groups,
             merge_sites,
             merge_named_sites,
+            list_name_merge_suggestions,
+            merge_name_suggestions,
             list_site_aliases,
             delete_site_alias,
             generate_password,
