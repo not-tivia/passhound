@@ -54,11 +54,50 @@ pub fn strip_url_noise(name: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod brand_tests {
+    use super::*;
+
+    #[test]
+    fn brand_label_strips_suffix_and_subdomains() {
+        assert_eq!(brand_label("reddit.com"), "reddit");
+        assert_eq!(brand_label("https://www.reddit.com"), "reddit");
+        assert_eq!(brand_label("reddit"), "reddit");          // bare kept
+        assert_eq!(brand_label("amazon.co.uk"), "amazon");    // compound suffix
+        assert_eq!(brand_label("us.battle.net"), "battle");   // subdomain collapsed first
+        assert_eq!(brand_label("RedDit.COM"), "reddit");      // lowercased
+    }
+
+    #[test]
+    fn has_public_suffix_distinguishes_domain_from_bare() {
+        assert!(has_public_suffix("reddit.com"));
+        assert!(has_public_suffix("battle.net"));
+        assert!(has_public_suffix("amazon.co.uk"));
+        assert!(!has_public_suffix("reddit"));        // bare
+        assert!(!has_public_suffix("zotacstore"));    // bare
+    }
+}
+
 fn is_org_tld(s: &str) -> bool {
     matches!(
         s.to_lowercase().as_str(),
         "com" | "org" | "io" | "net" | "co" | "app" | "me" | "edu" | "gov" | "info"
     )
+}
+
+/// The brand stem of a site name: the first label of its registrable domain, or
+/// the cleaned bare name when there is no public suffix. Lowercased.
+/// `reddit.com` -> "reddit"; `www.reddit.com` -> "reddit"; bare `reddit` -> "reddit";
+/// `amazon.co.uk` -> "amazon".
+pub fn brand_label(name: &str) -> String {
+    let canon = canonical_site_name(name); // registrable domain lowercased, or bare-as-is
+    canon.split('.').next().unwrap_or(&canon).to_string()
+}
+
+/// True iff the name's canonical form has a public suffix — i.e. it is a real
+/// registrable domain rather than a bare brand (`reddit.com` -> true, `reddit` -> false).
+pub fn has_public_suffix(name: &str) -> bool {
+    psl::domain_str(&canonical_site_name(name)).is_some()
 }
 
 /// Canonical equality key: the registrable domain (eTLD+1), lowercased.
