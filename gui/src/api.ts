@@ -29,6 +29,7 @@ import type {
   MergeResultView,
   MergeRequest,
   SiteAliasView,
+  NameMergeSuggestionView,
 } from "./types";
 
 // Wrap Tauri's `invoke` so caller gets typed promises and a stable
@@ -237,4 +238,10 @@ export const api = {
     call<MergeResultView>("merge_named_sites", { survivorId, loserIds }),
   listSiteAliases: () => call<SiteAliasView[]>("list_site_aliases"),
   deleteSiteAlias: (aliasId: number) => call<void>("delete_site_alias", { aliasId }),
+
+  // Phase 4.31 — brand-name merge suggestions
+  listNameMergeSuggestions: () =>
+    call<NameMergeSuggestionView[]>("list_name_merge_suggestions"),
+  mergeNameSuggestions: (pairs: { bare_site_id: number; target_site_id: number }[]) =>
+    call<MergeResultView>("merge_name_suggestions", { pairs }),
 };

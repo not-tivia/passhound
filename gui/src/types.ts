@@ -324,3 +324,22 @@ export interface SiteAliasView {
   original_name: string;
   site_id: number;
 }
+
+// Phase 4.31 — brand-name merge suggestions
+export interface DomainCandidateView {
+  site_id: number;
+  name: string;
+  canonical: string;
+  account_count: number;
+}
+
+export interface NameMergeSuggestionView {
+  bare_site_id: number;
+  bare_name: string;
+  bare_account_count: number;
+  brand: string;
+  candidates: DomainCandidateView[];
+  confidence: "High" | "Review";
+  review_reason: "CredentialMismatch" | "MultipleDomains" | null;
+  target_site_id: number | null;
+}
