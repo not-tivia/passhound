@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::repo::common;
 use crate::repo::passwords;
 use crate::repo::site_aliases;
-use crate::site_name::{canonical_site_name, strip_url_noise};
+use crate::site_name::{brand_label, canonical_site_name, has_public_suffix, strip_url_noise};
 use crate::vault::Vault;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -343,6 +343,117 @@ fn first_non_empty(
         }
     }
     primary
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum SuggestionConfidence { High, Review }
+
+#[derive(Debug, Clone, Serialize)]
+pub enum ReviewReason { CredentialMismatch, MultipleDomains }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DomainCandidate {
+    pub site_id: i64,
+    pub name: String,
+    pub canonical: String,
+    pub account_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NameMergeSuggestion {
+    pub bare_site_id: i64,
+    pub bare_name: String,
+    pub bare_account_count: usize,
+    pub brand: String,
+    pub candidates: Vec<DomainCandidate>,
+    pub confidence: SuggestionConfidence,
+    pub review_reason: Option<ReviewReason>,
+    pub target_site_id: Option<i64>,
+}
+
+/// Find bare-name sites that likely duplicate an existing registrable-domain
+/// site sharing the same brand stem. Key-aware: the High classification decrypts
+/// current passwords (the credential gate). Bare names with no domain sibling are
+/// omitted. Sorted High-first, then by bare account count desc, then brand asc.
+pub fn find_name_merge_suggestions(vault: &Vault) -> Result<Vec<NameMergeSuggestion>> {
+    let conn = vault.conn();
+
+    let mut counts: HashMap<i64, usize> = HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT site_id, COUNT(*) FROM accounts GROUP BY site_id")?;
+        for r in stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? {
+            let (sid, c) = r?;
+            counts.insert(sid, c as usize);
+        }
+    }
+
+    let sites: Vec<(i64, String)> = {
+        let mut stmt = conn.prepare("SELECT id, name FROM sites ORDER BY id")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    // Domain sites indexed by brand label.
+    let mut domains_by_brand: HashMap<String, Vec<DomainCandidate>> = HashMap::new();
+    let mut bares: Vec<(i64, String)> = Vec::new();
+    for (id, name) in &sites {
+        if has_public_suffix(name) {
+            domains_by_brand.entry(brand_label(name)).or_default().push(DomainCandidate {
+                site_id: *id,
+                name: name.clone(),
+                canonical: canonical_site_name(name),
+                account_count: counts.get(id).copied().unwrap_or(0),
+            });
+        } else {
+            bares.push((*id, name.clone()));
+        }
+    }
+
+    let mut out: Vec<NameMergeSuggestion> = Vec::new();
+    for (bare_id, bare_name) in bares {
+        let brand = brand_label(&bare_name);
+        let candidates = match domains_by_brand.get(&brand) {
+            Some(c) if !c.is_empty() => c.clone(),
+            _ => continue, // no domain sibling -> not a suggestion
+        };
+
+        // Distinct registrable-domain canonicals among the candidates.
+        let mut distinct: Vec<&str> = candidates.iter().map(|c| c.canonical.as_str()).collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+
+        let (confidence, review_reason, target_site_id) = if distinct.len() > 1 {
+            (SuggestionConfidence::Review, Some(ReviewReason::MultipleDomains), None)
+        } else {
+            // Exactly one canonical; target = lowest-id domain row of it.
+            let target = candidates.iter().min_by_key(|c| c.site_id).unwrap().site_id;
+            if credentials_corroborate(vault, bare_id, target)? {
+                (SuggestionConfidence::High, None, Some(target))
+            } else {
+                (SuggestionConfidence::Review, Some(ReviewReason::CredentialMismatch), Some(target))
+            }
+        };
+
+        out.push(NameMergeSuggestion {
+            bare_site_id: bare_id,
+            bare_name: bare_name.clone(),
+            bare_account_count: counts.get(&bare_id).copied().unwrap_or(0),
+            brand,
+            candidates,
+            confidence,
+            review_reason,
+            target_site_id,
+        });
+    }
+
+    // High first, then biggest bare first, then brand.
+    out.sort_by(|a, b| {
+        let rank = |c: &SuggestionConfidence| matches!(c, SuggestionConfidence::High);
+        rank(&b.confidence).cmp(&rank(&a.confidence))
+            .then(b.bare_account_count.cmp(&a.bare_account_count))
+            .then(a.brand.cmp(&b.brand))
+    });
+    Ok(out)
 }
 
 /// True iff some account under `bare_site` and some account under `domain_site`
@@ -984,6 +1095,85 @@ mod tests {
         let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
         add_login(&v, dom.id, "chris@example.com", "hunter2"); // bare has no accounts
         assert!(!credentials_corroborate(&v, bare.id, dom.id).unwrap(), "no bare login -> no corroboration");
+    }
+
+    // Phase 4.31 Task 3 -----------------------------------------------------------
+
+    #[test]
+    fn suggestions_high_when_credentials_match() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, bare.id, "chris@example.com", "hunter2");
+        add_login(&v, dom.id, "chris@example.com", "hunter2");
+
+        let sugg = find_name_merge_suggestions(&v).unwrap();
+        assert_eq!(sugg.len(), 1);
+        let s = &sugg[0];
+        assert_eq!(s.bare_site_id, bare.id);
+        assert_eq!(s.brand, "reddit");
+        assert!(matches!(s.confidence, SuggestionConfidence::High));
+        assert!(s.review_reason.is_none());
+        assert_eq!(s.target_site_id, Some(dom.id));
+    }
+
+    #[test]
+    fn suggestions_review_when_credentials_mismatch() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, bare.id, "chris@example.com", "hunter2");
+        add_login(&v, dom.id, "chris@example.com", "OTHER"); // pw differs
+
+        let s = &find_name_merge_suggestions(&v).unwrap()[0];
+        assert!(matches!(s.confidence, SuggestionConfidence::Review));
+        assert!(matches!(s.review_reason, Some(ReviewReason::CredentialMismatch)));
+        assert_eq!(s.target_site_id, Some(dom.id), "target still known, just unconfirmed");
+    }
+
+    #[test]
+    fn suggestions_review_multiple_domains_never_high() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "binance".into(), ..Default::default() }).unwrap();
+        let com = create(&v, NewSite { name: "binance.com".into(), ..Default::default() }).unwrap();
+        let us = create(&v, NewSite { name: "binance.us".into(), ..Default::default() }).unwrap();
+        // Even with matching creds on one side, ambiguity wins.
+        add_login(&v, bare.id, "chris@example.com", "hunter2");
+        add_login(&v, com.id, "chris@example.com", "hunter2");
+
+        let s = &find_name_merge_suggestions(&v).unwrap()[0];
+        assert!(matches!(s.confidence, SuggestionConfidence::Review));
+        assert!(matches!(s.review_reason, Some(ReviewReason::MultipleDomains)));
+        assert_eq!(s.target_site_id, None, "no single target for an ambiguous brand");
+        let cands: Vec<i64> = s.candidates.iter().map(|c| c.site_id).collect();
+        assert!(cands.contains(&com.id) && cands.contains(&us.id));
+    }
+
+    #[test]
+    fn suggestions_skip_bare_with_no_domain_sibling() {
+        let (_tmp, v) = vault();
+        create(&v, NewSite { name: "zotacstore".into(), ..Default::default() }).unwrap(); // bare, no domain
+        create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap(); // unrelated domain
+        let sugg = find_name_merge_suggestions(&v).unwrap();
+        assert!(sugg.is_empty(), "a bare name with no matching domain is not a suggestion");
+    }
+
+    #[test]
+    fn suggestions_high_sorted_before_review() {
+        let (_tmp, v) = vault();
+        // High: discord
+        let dbare = create(&v, NewSite { name: "discord".into(), ..Default::default() }).unwrap();
+        let ddom = create(&v, NewSite { name: "discord.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, dbare.id, "u@e.com", "pw");
+        add_login(&v, ddom.id, "u@e.com", "pw");
+        // Review: github (no creds)
+        create(&v, NewSite { name: "github".into(), ..Default::default() }).unwrap();
+        create(&v, NewSite { name: "github.com".into(), ..Default::default() }).unwrap();
+
+        let sugg = find_name_merge_suggestions(&v).unwrap();
+        assert_eq!(sugg.len(), 2);
+        assert!(matches!(sugg[0].confidence, SuggestionConfidence::High), "High first");
+        assert!(matches!(sugg[1].confidence, SuggestionConfidence::Review));
     }
 
     // Phase 4.29 Task 3 -----------------------------------------------------------
