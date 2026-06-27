@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::repo::common;
+use crate::repo::passwords;
 use crate::repo::site_aliases;
 use crate::site_name::{canonical_site_name, strip_url_noise};
 use crate::vault::Vault;
@@ -342,6 +343,40 @@ fn first_non_empty(
         }
     }
     primary
+}
+
+/// True iff some account under `bare_site` and some account under `domain_site`
+/// share BOTH the same username (case-insensitive, trimmed) AND the same current
+/// (non-retired) password plaintext. Decrypts current passwords via the vault key.
+fn credentials_corroborate(vault: &Vault, bare_site: i64, domain_site: i64) -> Result<bool> {
+    // (normalized_username, current_password) for every account on a site that
+    // has BOTH a non-blank username and a current password.
+    fn logins(vault: &Vault, site_id: i64) -> Result<Vec<(String, String)>> {
+        let ids: Vec<(i64, Option<String>)> = {
+            let conn = vault.conn();
+            let mut stmt = conn.prepare("SELECT id, username FROM accounts WHERE site_id = ?1")?;
+            let rows = stmt.query_map(params![site_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut out = Vec::new();
+        for (aid, username) in ids {
+            let user = match username.as_deref().map(|s| s.trim().to_lowercase()) {
+                Some(u) if !u.is_empty() => u,
+                _ => continue,
+            };
+            if let Some(pw) = passwords::current_plaintext(vault, aid)? {
+                out.push((user, pw.to_string()));
+            }
+        }
+        Ok(out)
+    }
+
+    let bare = logins(vault, bare_site)?;
+    if bare.is_empty() {
+        return Ok(false);
+    }
+    let domain = logins(vault, domain_site)?;
+    Ok(bare.iter().any(|(bu, bp)| domain.iter().any(|(du, dp)| bu == du && bp == dp)))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -889,6 +924,66 @@ mod tests {
         assert!(matches!(merge_named_sites(&v, a.id, &[a.id]), Err(Error::InvalidInput(_))));
         assert!(matches!(merge_named_sites(&v, a.id, &[9999]), Err(Error::NotFound)));
         assert!(matches!(merge_named_sites(&v, a.id, &[]), Err(Error::InvalidInput(_))));
+    }
+
+    // Phase 4.31 -------------------------------------------------------------
+
+    fn add_login(v: &Vault, site_id: i64, user: &str, pw: &str) -> i64 {
+        let a = accounts::create(v, NewAccount { site_id, username: Some(user.into()), ..Default::default() }).unwrap();
+        passwords::insert(v, NewPassword {
+            account_id: a.id, plaintext: pw, source: "manual".into(),
+            confidence: Confidence::Certain, notes: None, created_at: None,
+        }).unwrap();
+        a.id
+    }
+
+    #[test]
+    fn credentials_corroborate_requires_user_and_password() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, bare.id, "chris@example.com", "hunter2");
+        add_login(&v, dom.id, "chris@example.com", "hunter2");
+        assert!(credentials_corroborate(&v, bare.id, dom.id).unwrap(), "same user + same pw matches");
+    }
+
+    #[test]
+    fn credentials_corroborate_username_match_password_differ_is_false() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, bare.id, "chris@example.com", "hunter2");
+        add_login(&v, dom.id, "chris@example.com", "DIFFERENT");
+        assert!(!credentials_corroborate(&v, bare.id, dom.id).unwrap(), "password must also match");
+    }
+
+    #[test]
+    fn credentials_corroborate_password_match_username_differ_is_false() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, bare.id, "alt@example.com", "hunter2");
+        add_login(&v, dom.id, "chris@example.com", "hunter2");
+        assert!(!credentials_corroborate(&v, bare.id, dom.id).unwrap(), "username must also match");
+    }
+
+    #[test]
+    fn credentials_corroborate_username_case_insensitive() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, bare.id, "Chris@Example.com ", "hunter2");
+        add_login(&v, dom.id, "chris@example.com", "hunter2");
+        assert!(credentials_corroborate(&v, bare.id, dom.id).unwrap(), "username compared lower/trimmed");
+    }
+
+    #[test]
+    fn credentials_corroborate_no_accounts_is_false() {
+        let (_tmp, v) = vault();
+        let bare = create(&v, NewSite { name: "reddit".into(), ..Default::default() }).unwrap();
+        let dom = create(&v, NewSite { name: "reddit.com".into(), ..Default::default() }).unwrap();
+        add_login(&v, dom.id, "chris@example.com", "hunter2"); // bare has no accounts
+        assert!(!credentials_corroborate(&v, bare.id, dom.id).unwrap(), "no bare login -> no corroboration");
     }
 
     // Phase 4.29 Task 3 -----------------------------------------------------------
